@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "GestorPro Mobile",
+    "slug": "gestorpro-mobile",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "platforms": ["ios", "android", "web"],
+    "orientation": "portrait",
+    "extra": {
+      "eas": {
+        "projectId": "6be5b2ca-1cb1-4f19-907a-a7665a41da72"
+      }
+    },
+    "android": {
+      "package": "com.gestopro"
+    }
+  }
+}

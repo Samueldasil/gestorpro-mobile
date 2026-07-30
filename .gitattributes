@@ -1,0 +1,4 @@
+# Identifica automaticamente arquivos de texto e normaliza para LF no repositório
+* text=auto
+*.js text eol=lf
+*.json text eol=lf

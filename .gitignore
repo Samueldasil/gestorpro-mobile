@@ -1,0 +1,40 @@
+# Dependências
+node_modules
+
+# Expo
+.expo
+.expo-shared
+dist
+web-build
+
+# Nativo / builds
+android/build
+android/app/build
+android/.gradle
+android/.idea
+android/local.properties
+ios/build
+ios/Pods
+*.apk
+*.aab
+*.ipa
+*.keystore
+!debug.keystore
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# Metro
+.metro-health-check*
+
+# Logs
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS / editores
+.DS_Store
+.idea
