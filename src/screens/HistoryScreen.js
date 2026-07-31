@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, FlatList, StyleSheet,
   ScrollView, ActivityIndicator, Alert
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { formatMoney } from '../utils/format';
+import { formatMoney, formatDate } from '../utils/format';
 import { exportBudgetsToCSV } from '../utils/csvExporter';
 import { generateAndPreviewReport, generateSummaryPDF } from '../utils/pdfGenerator';
+import { reportError } from '../utils/errorHandler';
+import { toNumber } from '../utils/validators';
 
 // Dicionário visual para deixar a lista de ingredientes elegante
 const MAPA_UNIDADES = {
@@ -24,14 +26,25 @@ export default function HistoryScreen({
   onEditBudget,
   onDeleteBudget
 }) {
-  const [selected, setSelected] = useState(null);
+  // Guarda só o id: manter o objeto inteiro deixava o detalhe exibindo dados
+  // antigos após uma edição e mantinha na tela um orçamento já excluído.
+  const [selectedId, setSelectedId] = useState(null);
   const [exporting, setExporting] = useState(false);
 
+  const lista = Array.isArray(budgets) ? budgets : [];
+
+  const selected = useMemo(
+    () => (selectedId == null ? null : lista.find((b) => b?.id === selectedId) || null),
+    [lista, selectedId]
+  );
+
   const handleExport = async () => {
+    if (exporting) return;
     setExporting(true);
     try {
-      await exportBudgetsToCSV(budgets);
+      await exportBudgetsToCSV(lista);
     } catch (error) {
+      reportError(error, 'exportCSV');
       Alert.alert('Erro', error?.message || 'Falha ao exportar o CSV.');
     } finally {
       setExporting(false);
@@ -43,6 +56,7 @@ export default function HistoryScreen({
     try {
       await task();
     } catch (error) {
+      reportError(error, 'export');
       Alert.alert('Erro', error?.message || fallbackMessage);
     }
   };
@@ -50,10 +64,19 @@ export default function HistoryScreen({
   const confirmDelete = (id, nome) => {
     Alert.alert(
       'Excluir orçamento',
-      `Tem certeza que deseja excluir "${nome}"?`,
+      `Tem certeza que deseja excluir "${nome || 'este orçamento'}"?`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Sim, excluir', style: 'destructive', onPress: () => onDeleteBudget(id) }
+        {
+          text: 'Sim, excluir',
+          style: 'destructive',
+          onPress: () => {
+            // Fecha o detalhe: sem isso a tela continuava mostrando o
+            // orçamento recém-excluído.
+            setSelectedId(null);
+            onDeleteBudget?.(id);
+          }
+        }
       ]
     );
   };
@@ -65,19 +88,22 @@ export default function HistoryScreen({
     const insumos = item.insumos || [];
 
     // Limpa o imposto para ter no máximo 2 casas decimais sem zeros inúteis
-    const impostoLimpo = Number(item.imposto || result.imposto || 0).toFixed(2).replace(/\.00$/, '').replace('.', ',');
+    const impostoLimpo = toNumber(item.imposto ?? result.imposto, 0)
+      .toFixed(2)
+      .replace(/\.00$/, '')
+      .replace('.', ',');
 
     return (
       <ScrollView style={[styles.detailContainer, isDarkMode && styles.detailContainerDark]}>
         <View style={[styles.detailHeader, isDarkMode && styles.detailHeaderDark]}>
           <TouchableOpacity
             style={[styles.backButton, isDarkMode && styles.backButtonDark]}
-            onPress={() => setSelected(null)}
+            onPress={() => setSelectedId(null)}
           >
             <Feather name="arrow-left" size={24} color={isDarkMode ? '#FFFFFF' : '#000000'} />
           </TouchableOpacity>
           <Text style={[styles.detailTitle, isDarkMode && styles.detailTitleDark]} numberOfLines={1}>
-            {item.nome}
+            {item.nome || 'Sem nome'}
           </Text>
           <View style={styles.detailActions}>
             <TouchableOpacity
@@ -95,8 +121,8 @@ export default function HistoryScreen({
             <TouchableOpacity
               style={[styles.editButton, isDarkMode && styles.editButtonDark]}
               onPress={() => {
-                setSelected(null);
-                onEditBudget(item);
+                setSelectedId(null);
+                onEditBudget?.(item);
               }}
             >
               <Feather name="edit-2" size={20} color="#2563eb" />
@@ -114,7 +140,7 @@ export default function HistoryScreen({
           <View style={styles.infoItem}>
             <Text style={[styles.infoLabel, isDarkMode && styles.infoLabelDark]}>Data</Text>
             <Text style={[styles.infoValue, isDarkMode && styles.infoValueDark]}>
-              {new Date(item.createdAt || item.created_at).toLocaleDateString('pt-BR')}
+              {formatDate(item.createdAt || item.created_at)}
             </Text>
           </View>
           <View style={styles.infoItem}>
@@ -222,18 +248,18 @@ export default function HistoryScreen({
       ) : (
         <>
           <View style={styles.headerRow}>
-            <Text style={[styles.sectionTitle, isDarkMode && styles.sectionTitleDark]}>
+            <Text style={[styles.screenTitle, isDarkMode && styles.screenTitleDark]}>
               Histórico
             </Text>
             <View style={{ flexDirection: 'row' }}>
               <TouchableOpacity
-                onPress={() => runExport(() => generateSummaryPDF(budgets), 'Falha ao gerar o PDF.')}
-                disabled={budgets.length === 0}
+                onPress={() => runExport(() => generateSummaryPDF(lista), 'Falha ao gerar o PDF.')}
+                disabled={lista.length === 0}
                 style={{ marginRight: 15 }}
               >
                 <Feather name="file-text" size={20} color={isDarkMode ? '#bbf7d0' : '#16a34a'} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleExport} disabled={exporting || budgets.length === 0}>
+              <TouchableOpacity onPress={handleExport} disabled={exporting || lista.length === 0}>
                 {exporting ? <ActivityIndicator size="small" color="#2563eb" /> : 
                 <Feather name="download" size={20} color={isDarkMode ? '#93c5fd' : '#2563eb'} />}
               </TouchableOpacity>
@@ -243,23 +269,23 @@ export default function HistoryScreen({
             <ActivityIndicator size="large" color="#2563eb" />
           ) : (
             <FlatList
-              data={budgets}
-              keyExtractor={(item, index) => item?.id ? String(item.id) : `budget-${index}`}
+              data={lista}
+              keyExtractor={(item, index) => item?.id != null ? String(item.id) : `budget-${index}`}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[styles.card, isDarkMode && styles.cardDark]}
-                  onPress={() => setSelected(item)}
+                  // Itens sem id não têm detalhe estável para abrir.
+                  disabled={item?.id == null}
+                  onPress={() => setSelectedId(item?.id)}
                 >
                   <View>
                     <Text style={[styles.cardTitle, isDarkMode && styles.cardTitleDark]}>
-                      {item.nome}
+                      {item.nome || 'Sem nome'}
                     </Text>
                     <Text
                       style={[styles.cardSubtitle, isDarkMode && styles.cardSubtitleDark]}
                     >
-                      {new Date(item.createdAt || item.created_at).toLocaleDateString(
-                        'pt-BR'
-                      )}
+                      {formatDate(item.createdAt || item.created_at)}
                     </Text>
                   </View>
                   <Text style={[styles.cardValue, isDarkMode && styles.cardValueDark]}>
@@ -283,9 +309,11 @@ export default function HistoryScreen({
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: 16, backgroundColor: '#f8fafc' },
   screenDark: { backgroundColor: '#020617' },
-  sectionTitle: { fontSize: 18, fontWeight: '800', marginBottom: 14, color: '#0f172a' },
+  // Antes chamava-se `sectionTitle` e era sobrescrito pela outra definição
+  // do mesmo nome mais abaixo — o título "Histórico" saía minúsculo e em caixa alta.
+  screenTitle: { fontSize: 18, fontWeight: '800', marginBottom: 14, color: '#0f172a' },
+  screenTitleDark: { color: '#e2e8f0' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sectionTitleDark: { color: '#e2e8f0' },
   card: {
     backgroundColor: '#fff',
     borderRadius: 24,

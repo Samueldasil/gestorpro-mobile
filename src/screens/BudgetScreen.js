@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, ActivityIndicator, Modal
@@ -6,10 +6,11 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { formatMoney } from '../utils/format';
-import { calcularOrcamento } from '../utils/calculator';
-import { sanitizeNumber } from '../utils/validators';
+import { calcularOrcamento, custoInsumo } from '../utils/calculator';
+import { sanitizeNumber, validateInsumo, toNumber } from '../utils/validators';
 import { saveBudgetController } from '../controllers/budgetController';
 import { useAuth } from '../contexts/AuthContext';
+import { reportError } from '../utils/errorHandler';
 
 // Dicionário visual para deixar a lista de ingredientes elegante
 const MAPA_UNIDADES = {
@@ -18,14 +19,6 @@ const MAPA_UNIDADES = {
   kg: 'Quilos',
   ml: 'Mililitros',
   l: 'Litros'
-};
-
-// Custo proporcional de um insumo, protegido contra lote zerado (evita NaN/Infinity na tela).
-const custoInsumo = (item) => {
-  const preco = Number(item?.preco) || 0;
-  const lote = Number(item?.qtdLote) || 0;
-  const usada = Number(item?.qtdUsada) || 0;
-  return lote > 0 ? (preco / lote) * usada : 0;
 };
 
 // =====================================================================
@@ -83,50 +76,61 @@ export default function BudgetScreen({
     nome: '', preco: '', qtdLote: '', unidadeLote: 'kg', qtdUsada: '', unidadeUsada: 'g'
   });
   
-  const [saving, setSaving] = useState(false); 
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [isEditing, setIsEditing] = useState(false); 
   const [showTaxModal, setShowTaxModal] = useState(false); // Modal de Impostos
 
   useEffect(() => {
-    if (initialBudget) {
-      setIsEditing(true);
-      setNomeProduto(initialBudget.nome); setQtdProduto(initialBudget.qtdProduto?.toString() || '');
-      setUnidadeProduto(initialBudget.unidadeProduto || 'un'); setPrecoVendaValor(initialBudget.precoVendaValor?.toString() || '');
-      setPrecoVendaTipo(initialBudget.precoVendaTipo || 'total'); setImposto(initialBudget.imposto?.toString() || '');
-      setModoCusto(initialBudget.modoCusto || 'automatico'); setTempoPreparo(initialBudget.tempoPreparo?.toString() || '');
-      setCustoManual(initialBudget.custoManual?.toString() || '');
-      if (Array.isArray(initialBudget.insumos)) {
-        setInsumos(initialBudget.insumos.map(ins => ({
-          id: ins.id || String(Math.random()),
-          nome: ins.nome, preco: ins.preco, qtdLote: ins.qtdLote, unidadeLote: ins.unidadeLote,
-          qtdUsada: ins.qtdUsada, unidadeUsada: ins.unidadeUsada
-        })));
-      }
+    if (!initialBudget) {
+      setIsEditing(false);
+      return;
     }
+
+    // Campos ausentes viravam `undefined` no TextInput, que deixa o input
+    // descontrolado e faz o React perder o que o usuário digita depois.
+    setIsEditing(true);
+    setNomeProduto(initialBudget.nome ?? '');
+    setQtdProduto(initialBudget.qtdProduto?.toString() ?? '');
+    setUnidadeProduto(initialBudget.unidadeProduto || 'un');
+    setPrecoVendaValor(initialBudget.precoVendaValor?.toString() ?? '');
+    setPrecoVendaTipo(initialBudget.precoVendaTipo || 'total');
+    setImposto(initialBudget.imposto?.toString() ?? '');
+    setModoCusto(initialBudget.modoCusto || 'automatico');
+    setTempoPreparo(initialBudget.tempoPreparo?.toString() ?? '');
+    setCustoManual(initialBudget.custoManual?.toString() ?? '');
+
+    setInsumos(
+      Array.isArray(initialBudget.insumos)
+        ? initialBudget.insumos.map((ins, index) => ({
+            id: ins?.id != null ? String(ins.id) : `insumo-${index}-${initialBudget.id ?? 'novo'}`,
+            nome: ins?.nome ?? '',
+            preco: ins?.preco,
+            qtdLote: ins?.qtdLote,
+            unidadeLote: ins?.unidadeLote || 'kg',
+            qtdUsada: ins?.qtdUsada,
+            unidadeUsada: ins?.unidadeUsada || 'g'
+          }))
+        : []
+    );
   }, [initialBudget]);
 
   const adicionarInsumo = () => {
-    if (!novoInsumo.nome.trim() || !novoInsumo.preco || !novoInsumo.qtdLote || !novoInsumo.qtdUsada) {
-      return onShowToast?.('Preencha todos os campos do ingrediente.', 'error');
-    }
-
-    const precoLote = parseFloat(sanitizeNumber(novoInsumo.preco));
-    const qtdLote = parseFloat(sanitizeNumber(novoInsumo.qtdLote));
-    const qtdUsada = parseFloat(sanitizeNumber(novoInsumo.qtdUsada));
-
-    if (isNaN(precoLote) || isNaN(qtdLote) || isNaN(qtdUsada) || qtdLote <= 0) {
-      return onShowToast?.('Valores inválidos no ingrediente.', 'error');
+    // Validação centralizada em validators.js, em vez de duplicada aqui.
+    const erro = validateInsumo(novoInsumo);
+    if (erro) {
+      return onShowToast?.(erro, 'error');
     }
 
     setInsumos(prev => [
       ...prev,
       {
-        id: `${Date.now()}-${Math.random()}`,
-        nome: novoInsumo.nome,
-        preco: precoLote,
-        qtdLote,
+        id: `${Date.now()}-${prev.length}`,
+        nome: novoInsumo.nome.trim(),
+        preco: toNumber(novoInsumo.preco),
+        qtdLote: toNumber(novoInsumo.qtdLote),
         unidadeLote: novoInsumo.unidadeLote,
-        qtdUsada,
+        qtdUsada: toNumber(novoInsumo.qtdUsada),
         unidadeUsada: novoInsumo.unidadeUsada
       }
     ]);
@@ -156,23 +160,36 @@ export default function BudgetScreen({
   }, [insumos, modoCusto, tempoPreparo, custoManual, configGlobal, imposto, qtdProduto, unidadeProduto, precoVendaValor, precoVendaTipo]);
 
   const handleSave = async () => {
+    // Trava síncrona contra duplo toque: `saving` só vale no próximo render,
+    // então dois toques no mesmo frame salvavam o orçamento duas vezes.
+    if (savingRef.current) return;
+    savingRef.current = true;
+
     const payload = {
       nomeProduto,
       insumos: insumos.map(i => ({ nome: i.nome, preco: i.preco, qtdLote: i.qtdLote, unidadeLote: i.unidadeLote, qtdUsada: i.qtdUsada, unidadeUsada: i.unidadeUsada })),
-      qtdProduto: sanitizeNumber(qtdProduto) || 0, unidadeProduto, precoVendaValor: sanitizeNumber(precoVendaValor) || 0, precoVendaTipo,
-      imposto: sanitizeNumber(imposto) || 0, modoCusto, tempoPreparo: sanitizeNumber(tempoPreparo) || 0, custoManual: sanitizeNumber(custoManual) || 0,
+      qtdProduto: toNumber(qtdProduto), unidadeProduto, precoVendaValor: toNumber(precoVendaValor), precoVendaTipo,
+      imposto: toNumber(imposto), modoCusto, tempoPreparo: toNumber(tempoPreparo), custoManual: toNumber(custoManual),
       configGlobal: configGlobal || {}
     };
 
     setSaving(true);
     try {
       const response = await saveBudgetController(payload, effectiveToken);
-      onBudgetSaved(response.budget);
-      if (isEditing && onClearEditing) onClearEditing();
+
+      // O interceptador da API já achata o erro em uma Error simples, então
+      // `error.response` nunca existia aqui. O que faltava era validar o sucesso:
+      // uma resposta sem `budget` estourava dentro deste try e o usuário via
+      // "falha ao salvar" mesmo com o orçamento gravado no servidor.
+      const budgetSalvo = response?.budget ?? response?.data?.budget ?? null;
+
+      onBudgetSaved?.(budgetSalvo);
       limparFormulario();
     } catch (error) {
-      onShowToast?.(error.response?.data?.error || error.message || 'Falha ao salvar orçamento.', 'error');
+      reportError(error, 'saveBudget');
+      onShowToast?.(error?.message || 'Falha ao salvar orçamento.', 'error');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -271,9 +288,9 @@ export default function BudgetScreen({
                 <TextInput style={[styles.input, styles.flex, isDarkMode && styles.inputDark]} placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} placeholder="Qtd lote" keyboardType="numeric" value={novoInsumo.qtdLote} onChangeText={text => setNovoInsumo(prev => ({ ...prev, qtdLote: sanitizeNumber(text) }))} />
               </View>
               <View style={styles.gridRow}>
-                <View style={[styles.flex, { marginRight: 8 }]}><Text style={styles.smallLabel}>Unid. lote</Text><Picker selectedValue={novoInsumo.unidadeLote} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeLote: val }))} style={styles.smallPicker}><Picker.Item label="kg" value="kg" /><Picker.Item label="g" value="g" /><Picker.Item label="l" value="l" /><Picker.Item label="ml" value="ml" /><Picker.Item label="un" value="un" /></Picker></View>
+                <View style={[styles.flex, { marginRight: 8 }]}><Text style={styles.smallLabel}>Unid. lote</Text><Picker selectedValue={novoInsumo.unidadeLote} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeLote: val }))} style={[styles.smallPicker, isDarkMode && styles.pickerDark]} dropdownIconColor={isDarkMode ? '#94a3b8' : '#64748b'}><Picker.Item label="kg" value="kg" /><Picker.Item label="g" value="g" /><Picker.Item label="l" value="l" /><Picker.Item label="ml" value="ml" /><Picker.Item label="un" value="un" /></Picker></View>
                 <View style={[styles.flex, { marginRight: 8 }]}><Text style={styles.smallLabel}>Qtd usada</Text><TextInput placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} style={[styles.input, isDarkMode && styles.inputDark]} placeholder="Qtd" keyboardType="numeric" value={novoInsumo.qtdUsada} onChangeText={text => setNovoInsumo(prev => ({ ...prev, qtdUsada: sanitizeNumber(text) }))} /></View>
-                <View style={styles.flex}><Text style={styles.smallLabel}>Unid. usada</Text><Picker selectedValue={novoInsumo.unidadeUsada} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeUsada: val }))} style={styles.smallPicker}><Picker.Item label="g" value="g" /><Picker.Item label="kg" value="kg" /><Picker.Item label="ml" value="ml" /><Picker.Item label="l" value="l" /><Picker.Item label="un" value="un" /></Picker></View>
+                <View style={styles.flex}><Text style={styles.smallLabel}>Unid. usada</Text><Picker selectedValue={novoInsumo.unidadeUsada} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeUsada: val }))} style={[styles.smallPicker, isDarkMode && styles.pickerDark]} dropdownIconColor={isDarkMode ? '#94a3b8' : '#64748b'}><Picker.Item label="g" value="g" /><Picker.Item label="kg" value="kg" /><Picker.Item label="ml" value="ml" /><Picker.Item label="l" value="l" /><Picker.Item label="un" value="un" /></Picker></View>
               </View>
               <TouchableOpacity style={[styles.secondaryButton, isDarkMode && styles.secondaryButtonDark]} onPress={adicionarInsumo}><Text style={[styles.secondaryButtonText, isDarkMode && styles.secondaryButtonTextDark]}>Adicionar</Text></TouchableOpacity>
             </View>
@@ -358,7 +375,14 @@ export default function BudgetScreen({
       {/* ========================================================= */}
       {/* MODAL INTELIGENTE DE IMPOSTOS POR ESTADO */}
       {/* ========================================================= */}
-      <Modal visible={showTaxModal} transparent={true} animationType="slide">
+      {/* onRequestClose é obrigatório no Android: sem ele o botão físico Voltar
+          não fechava o modal e o usuário ficava preso na lista de estados. */}
+      <Modal
+        visible={showTaxModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTaxModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, isDarkMode && styles.modalContentDark]}>
             <View style={styles.modalHeader}>

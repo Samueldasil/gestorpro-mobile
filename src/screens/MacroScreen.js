@@ -4,16 +4,22 @@ import { formatMoney } from '../utils/format';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import MacroReportScreen from './MacroReportScreen';
 import { getMacroSummary, exportCSV as controllerExportCSV, generatePDF as controllerGeneratePDF } from '../controllers/macroController';
+import { reportError } from '../utils/errorHandler';
 
 export default function MacroScreen({ budgets, isDarkMode }) {
   const [showReport, setShowReport] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+
+  const lista = Array.isArray(budgets) ? budgets : [];
 
   const handleExportCSV = async () => {
+    if (exporting) return;
     setExporting(true);
     try {
-      await controllerExportCSV(budgets);
+      await controllerExportCSV(lista);
     } catch (error) {
+      reportError(error, 'macroExportCSV');
       Alert.alert('Erro', error?.message || 'Falha ao exportar o CSV.');
     } finally {
       setExporting(false);
@@ -21,34 +27,42 @@ export default function MacroScreen({ budgets, isDarkMode }) {
   };
 
   const handleGeneratePDF = async () => {
+    // Sem esta trava, toques repetidos abriam vários compartilhamentos em fila.
+    if (generatingPdf) return;
+    setGeneratingPdf(true);
     try {
-      await controllerGeneratePDF(budgets);
+      await controllerGeneratePDF(lista);
     } catch (error) {
+      reportError(error, 'macroGeneratePDF');
       Alert.alert('Erro', error?.message || 'Falha ao gerar o PDF.');
+    } finally {
+      setGeneratingPdf(false);
     }
   };
 
   if (showReport) {
-    return <MacroReportScreen budgets={budgets} onBack={() => setShowReport(false)} isDarkMode={isDarkMode} />;
+    return <MacroReportScreen budgets={lista} onBack={() => setShowReport(false)} isDarkMode={isDarkMode} />;
   }
 
   // Use controller para obter resumo
-  const { totalRevenue, totalCost, totalProfit, totalBudgets } = getMacroSummary(budgets);
+  const { totalRevenue, totalCost, totalProfit, totalBudgets } = getMacroSummary(lista);
 
   return (
     <View style={[styles.screen, isDarkMode && styles.screenDark]}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Text style={[styles.sectionTitle, isDarkMode && styles.sectionTitleDark, { marginBottom: 0 }]}>Macro</Text>
         <View style={{ flexDirection: 'row' }}>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={handleGeneratePDF}
-            style={{ flexDirection: 'row', alignItems: 'center', marginRight: 12 }}
+            disabled={generatingPdf || lista.length === 0}
+            style={{ flexDirection: 'row', alignItems: 'center', marginRight: 12, opacity: lista.length === 0 ? 0.4 : 1 }}
           >
             <MaterialCommunityIcons name="file-pdf-box" size={20} color="#ef4444" />
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={handleExportCSV}
-            style={{ flexDirection: 'row', alignItems: 'center' }}
+            disabled={exporting || lista.length === 0}
+            style={{ flexDirection: 'row', alignItems: 'center', opacity: lista.length === 0 ? 0.4 : 1 }}
           >
             <MaterialCommunityIcons name="microsoft-excel" size={20} color="#16a34a" style={{ marginRight: 4 }} />
             <Text style={{ color: '#16a34a', fontWeight: 'bold', fontSize: 12 }}>Excel</Text>

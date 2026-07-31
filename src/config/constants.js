@@ -8,8 +8,11 @@ export const MIN_PASSWORD_LENGTH = 6;
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // API
-export const API_TIMEOUT_SHORT = 15000;  // 15 segundos para requisições rápidas
-export const API_TIMEOUT_LONG = 30000;   // 30 segundos para orçamentos
+export const API_TIMEOUT_SHORT = 15000;    // 15 segundos para requisições rápidas
+// Salvar orçamento é a requisição mais pesada: precisa de MAIS tempo que o
+// padrão, não menos (antes eram 30s, que cortavam o salvamento em servidor frio).
+export const API_TIMEOUT_LONG = 90000;     // 90 segundos para orçamentos
+export const API_TIMEOUT_DEFAULT = 60000;  // 60 segundos: margem para o servidor acordar (Render free)
 
 // Cálculos
 export const MINUTES_PER_HOUR = 60;

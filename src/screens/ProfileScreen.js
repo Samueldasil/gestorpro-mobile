@@ -6,6 +6,7 @@ import PrivacyScreen from './PrivacyScreen';
 import TermsScreen from './TermsScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { saveGlobalConfig, clearAndReloadData } from '../controllers/profileController';
+import { reportError } from '../utils/errorHandler';
 import useBackHandler from './useBackHandler'; // <-- Importado para funcionar no Perfil
 
 export default function ProfileScreen({
@@ -44,12 +45,13 @@ export default function ProfileScreen({
 
   const handleSaveConfig = async (newConfig) => {
     try {
+      // Gravação acontece só aqui; o App apenas espelha o valor em memória.
       await saveGlobalConfig(newConfig);
       onSaveConfigGlobal?.(newConfig);
       onShowToast?.('Configurações salvas.', 'success');
       setSubScreen(null);
     } catch (err) {
-      console.error(err);
+      reportError(err, 'saveGlobalConfig');
       onShowToast?.('Falha ao salvar configurações.', 'error');
     }
   };
@@ -61,8 +63,8 @@ export default function ProfileScreen({
       onClearData?.(response);
       onShowToast?.('Dados recarregados da nuvem.', 'success');
     } catch (err) {
-      console.error(err);
-      onShowToast?.('Falha de rede ao recarregar dados.', 'error');
+      reportError(err, 'clearAndReloadData');
+      onShowToast?.(err?.message || 'Falha de rede ao recarregar dados.', 'error');
     }
   };
 

@@ -5,8 +5,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 // O SafeAreaProvider agora vai ficar só no root!
@@ -24,22 +22,47 @@ import TabBar from './src/components/TabBar';
 import LogoBadge from './src/components/LogoBadge';
 import { getHistory, deleteBudget } from './src/api/api';
 import { setUnauthorizedHandler } from './src/services/apiService';
-import { loadGlobalConfig, saveGlobalConfig } from './src/controllers/profileController';
+import { loadGlobalConfig } from './src/controllers/profileController';
+import { installGlobalErrorHandler, setErrorListener, reportError } from './src/utils/errorHandler';
+
+// Instalado antes de qualquer render: erros de callback nativo e promises sem
+// catch passam a ser logados e exibidos em vez de fechar o app sem aviso.
+installGlobalErrorHandler();
 
 class AppErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, message: '', resetKey: 0 };
   }
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, message: error?.message || '' };
+  }
+
+  componentDidMount() {
+    // Erros fatais que acontecem fora do render (async, listeners nativos) não
+    // chegam ao boundary por conta própria — o handler global os encaminha.
+    setErrorListener(({ context, message }) => {
+      if (context === 'fatal' && !this.state.hasError) {
+        this.setState({ hasError: true, message });
+      }
+    });
+  }
+
+  componentWillUnmount() {
+    setErrorListener(null);
   }
 
   componentDidCatch(error, info) {
-    console.error('Erro não tratado capturado pelo boundary:', error, info);
-    Alert.alert('Ops', 'O app encontrou um erro inesperado. Tente reiniciar a tela.');
+    reportError(error, 'render');
+    if (info?.componentStack) console.error(info.componentStack);
   }
+
+  handleRetry = () => {
+    // Trocar a key remonta a árvore inteira: sem isso o "tentar novamente"
+    // reexibia exatamente o mesmo estado quebrado.
+    this.setState((prev) => ({ hasError: false, message: '', resetKey: prev.resetKey + 1 }));
+  };
 
   render() {
     if (this.state.hasError) {
@@ -47,8 +70,11 @@ class AppErrorBoundary extends Component {
         <SafeAreaView style={styles.container}>
           <View style={styles.errorContainer}>
             <Text style={styles.errorTitle}>Algo deu errado</Text>
-            <Text style={styles.errorText}>O aplicativo encontrou um erro inesperado. Reinicie a tela ou volte para o início.</Text>
-            <TouchableOpacity style={styles.errorButton} onPress={() => this.setState({ hasError: false })}>
+            <Text style={styles.errorText}>O aplicativo encontrou um erro inesperado. Toque abaixo para recarregar a tela.</Text>
+            {!!this.state.message && (
+              <Text style={styles.errorDetail} numberOfLines={3}>{this.state.message}</Text>
+            )}
+            <TouchableOpacity style={styles.errorButton} onPress={this.handleRetry}>
               <Text style={styles.errorButtonText}>Tentar novamente</Text>
             </TouchableOpacity>
           </View>
@@ -56,7 +82,7 @@ class AppErrorBoundary extends Component {
       );
     }
 
-    return this.props.children;
+    return <View key={this.state.resetKey} style={styles.container}>{this.props.children}</View>;
   }
 }
 
@@ -82,12 +108,23 @@ function AppContent() {
 
   // Persistência da config global fica só no profileService — App apenas espelha em memória.
   useEffect(() => {
-    loadGlobalConfig().then(setConfigGlobal);
+    let isMounted = true;
+
+    loadGlobalConfig()
+      .then((config) => {
+        if (isMounted && config) setConfigGlobal(config);
+      })
+      .catch((error) => reportError(error, 'loadGlobalConfig'));
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const handleSaveConfigGlobal = async (newConfig) => {
+  // O ProfileScreen já grava no AsyncStorage; aqui só espelhamos em memória
+  // para não gravar a mesma config duas vezes a cada salvamento.
+  const handleSaveConfigGlobal = (newConfig) => {
     setConfigGlobal(newConfig);
-    await saveGlobalConfig(newConfig);
   };
 
   const toastTimer = useRef(null);
@@ -176,9 +213,18 @@ function AppContent() {
   };
 
   const handleBudgetSaved = (newBudget) => {
+    // Resposta fora do formato esperado quebrava aqui dentro do try do
+    // BudgetScreen: o orçamento era salvo mas o usuário via "falha ao salvar".
+    if (!newBudget || typeof newBudget !== 'object') {
+      reportError(new Error('Resposta do servidor sem orçamento'), 'handleBudgetSaved');
+      showToast('Orçamento salvo, mas não foi possível atualizar a lista. Recarregue o histórico.', 'error');
+      setEditingBudget(null);
+      return;
+    }
+
     const wasEditing = !!editingBudget;
     setBudgets((prev) => {
-      const exists = prev.find((b) => b.id === newBudget.id);
+      const exists = newBudget.id != null && prev.some((b) => b.id === newBudget.id);
       if (exists) {
         return prev.map((b) => (b.id === newBudget.id ? newBudget : b));
       }
@@ -198,9 +244,11 @@ function AppContent() {
     try {
       await deleteBudget(id);
       setBudgets((prev) => prev.filter((b) => b.id !== id));
-      showToast('Orçamento excluído.', 'error');
+      // Exclusão bem-sucedida usava o toast vermelho de erro.
+      showToast('Orçamento excluído.', 'success');
     } catch (error) {
-      showToast('Erro ao excluir orçamento.', 'error');
+      reportError(error, 'deleteBudget');
+      showToast(error?.message || 'Erro ao excluir orçamento.', 'error');
     }
   };
 
@@ -299,7 +347,7 @@ function AppContent() {
       <View style={styles.content}>{renderScreen()}</View>
 
       {activeTab !== 'perfil' && (
-        <View style={[styles.tabBarContainer, isDarkMode && styles.tabBarContainerDark, { paddingBottom: 16 }]}> 
+        <View style={[styles.tabBarContainer, isDarkMode && styles.tabBarContainerDark]}>
           <TabBar activeTab={activeTab} onChangeTab={setActiveTab} isDarkMode={isDarkMode} />
         </View>
       )}
@@ -307,15 +355,17 @@ function AppContent() {
   );
 }
 
-// A MÁGICA ESTÁ AQUI: O SafeAreaProvider blinda o aplicativo na raiz e nunca é destruído.
+// O SafeAreaProvider blinda o aplicativo na raiz e nunca é destruído.
+// O boundary fica por fora do AuthProvider: uma falha ao restaurar a sessão
+// também precisa cair na tela de erro, e não em uma tela branca.
 export default function App() {
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <AppErrorBoundary>
+      <AppErrorBoundary>
+        <AuthProvider>
           <AppContent />
-        </AppErrorBoundary>
-      </AuthProvider>
+        </AuthProvider>
+      </AppErrorBoundary>
     </SafeAreaProvider>
   );
 }
@@ -324,7 +374,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   errorTitle: { fontSize: 22, fontWeight: '800', color: '#0f172a', marginBottom: 10 },
-  errorText: { fontSize: 15, color: '#475569', textAlign: 'center', marginBottom: 20 },
+  errorText: { fontSize: 15, color: '#475569', textAlign: 'center', marginBottom: 12 },
+  errorDetail: { fontSize: 12, color: '#94a3b8', textAlign: 'center', marginBottom: 20 },
   errorButton: { backgroundColor: '#2563eb', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 16 },
   errorButtonText: { color: '#fff', fontWeight: '700' },
   darkBackground: { backgroundColor: '#020617' },
@@ -338,7 +389,7 @@ const styles = StyleSheet.create({
   profileCircleDark: { backgroundColor: '#1d4ed8' },
   profileInitial: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
   content: { flex: 1 },
-  tabBarContainer: { backgroundColor: '#f8fafc', borderTopWidth: 1, borderTopColor: '#e2e8f0' },
+  tabBarContainer: { backgroundColor: '#f8fafc', borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 10, paddingBottom: 12 },
   tabBarContainerDark: { backgroundColor: '#020617', borderTopColor: '#1e293b' },
   toast: { position: 'absolute', top: 60, alignSelf: 'center', zIndex: 50, paddingVertical: 14, paddingHorizontal: 24, borderRadius: 30, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
   toastSuccess: { backgroundColor: '#0f172a' },

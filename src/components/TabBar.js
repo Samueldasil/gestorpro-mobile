@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, TouchableOpacity, Text, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 const tabs = [
@@ -42,10 +42,10 @@ export default function TabBar({ activeTab, onChangeTab, isDarkMode }) {
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 32 : 16,
-    left: 20,
-    right: 20,
+    // Antes era `position: 'absolute'` dentro de um container que colapsava
+    // para ~17px de altura: a barra era desenhada fora do pai e o Android
+    // recortava parte dela. No fluxo normal ela ocupa o espaço que precisa.
+    marginHorizontal: 20,
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: 14,

@@ -1,6 +1,8 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { formatMoney } from './format';
+import { formatMoney, formatDate } from './format';
+import { custoInsumo } from './calculator';
+import { reportError } from './errorHandler';
 
 // Escapa o que vem do usuário antes de entrar no HTML do relatório.
 const esc = (value) =>
@@ -9,12 +11,16 @@ const esc = (value) =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-// Custo proporcional de um insumo, protegido contra lote zerado/ausente.
-const custoInsumo = (ing) => {
-  const preco = Number(ing?.preco) || 0;
-  const lote = Number(ing?.qtdLote) || 0;
-  const usada = Number(ing?.qtdUsada) || 0;
-  return lote > 0 ? (preco / lote) * usada : 0;
+// Gera o PDF e abre o menu nativo. Sem a checagem de disponibilidade, aparelhos
+// sem app de compartilhamento rejeitavam com um erro nativo indecifrável.
+const compartilharPdf = async (htmlContent, dialogTitle) => {
+  const podeCompartilhar = await Sharing.isAvailableAsync();
+  if (!podeCompartilhar) {
+    throw new Error('Compartilhamento não disponível neste dispositivo.');
+  }
+
+  const { uri } = await Print.printToFileAsync({ html: htmlContent });
+  await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle });
 };
 
 /**
@@ -22,8 +28,12 @@ const custoInsumo = (ing) => {
  * Isso permite que o usuário use a função nativa do navegador para "Salvar como PDF".
  */
 export const generateAndPreviewReport = async (orcamento) => {
+  if (!orcamento || typeof orcamento !== 'object') {
+    throw new Error('Orçamento indisponível para gerar o relatório.');
+  }
+
   const result = orcamento.result || {};
-  const insumos = orcamento.insumos || [];
+  const insumos = Array.isArray(orcamento.insumos) ? orcamento.insumos : [];
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -54,7 +64,7 @@ export const generateAndPreviewReport = async (orcamento) => {
       <div class="header">
         <h1>GestorPro</h1>
         <p>Relatório Detalhado de Precificação</p>
-        <p>Gerado em ${new Date(orcamento.createdAt || orcamento.created_at || Date.now()).toLocaleDateString('pt-BR')}</p>
+        <p>Gerado em ${formatDate(orcamento.createdAt || orcamento.created_at || new Date())}</p>
       </div>
 
       <div class="info-grid">
@@ -98,11 +108,11 @@ export const generateAndPreviewReport = async (orcamento) => {
           <span>${formatMoney(result.custoIngredientes || 0)}</span>
         </div>
         <div class="total-row">
-          <span>Custos Operacionais (${orcamento.modoCusto === 'automatico' ? orcamento.tempoPreparo + 'min' : 'Fixo'}):</span>
+          <span>Custos Operacionais (${orcamento.modoCusto === 'automatico' ? esc(orcamento.tempoPreparo ?? 0) + 'min' : 'Fixo'}):</span>
           <span>${formatMoney(result.valorOperacional || 0)}</span>
         </div>
         <div class="total-row">
-          <span>Impostos Aplicados (${orcamento.imposto || 0}%):</span>
+          <span>Impostos Aplicados (${esc(orcamento.imposto ?? 0)}%):</span>
           <span>${formatMoney(result.valorImposto || 0)}</span>
         </div>
         <div class="total-main">
@@ -124,13 +134,10 @@ export const generateAndPreviewReport = async (orcamento) => {
   `;
 
   try {
-    // A MÁGICA: O motor do Android pega o HTML e compila em um arquivo .pdf real na memória
-    const { uri } = await Print.printToFileAsync({ html: htmlContent });
-    
-    // Abre a ferramenta nativa do Android perguntando se quer ver, imprimir ou salvar o PDF
-    await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Abrir Relatório PDF' });
+    // O motor nativo pega o HTML e compila em um arquivo .pdf real
+    await compartilharPdf(htmlContent, 'Abrir Relatório PDF');
   } catch (error) {
-    console.error('Erro ao compilar PDF nativo:', error);
+    reportError(error, 'generateAndPreviewReport');
     // Propaga para a tela conseguir avisar o usuário em vez de falhar em silêncio.
     throw error;
   }
@@ -181,7 +188,7 @@ export const generateSummaryPDF = async (budgets) => {
           ${orcamentosAtivos.map(b => `
             <tr>
               <td>${esc(b.nome)}</td>
-              <td>${new Date(b.createdAt || b.created_at).toLocaleDateString('pt-BR')}</td>
+              <td>${formatDate(b.createdAt || b.created_at)}</td>
               <td>${formatMoney(b.result?.custoTotal || 0)}</td>
               <td>${formatMoney(b.result?.precoSugeridoTotal || 0)}</td>
               <td style="color: ${(b.result?.lucro || 0) >= 0 ? '#16a34a' : '#ef4444'}">
@@ -200,7 +207,7 @@ export const generateSummaryPDF = async (budgets) => {
         </tfoot>
       </table>
       <div class="footer">
-        Gerado pelo GestorPro em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}
+        Gerado pelo GestorPro em ${formatDate(new Date())}
       </div>
     </body>
     </html>
@@ -208,10 +215,9 @@ export const generateSummaryPDF = async (budgets) => {
 
   try {
     // Converte o HTML em PDF real como na função individual
-    const { uri } = await Print.printToFileAsync({ html: htmlContent });
-    await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Abrir Resumo PDF' });
+    await compartilharPdf(htmlContent, 'Abrir Resumo PDF');
   } catch (error) {
-    console.error('Erro ao gerar resumo:', error);
+    reportError(error, 'generateSummaryPDF');
     // Propaga para a tela conseguir avisar o usuário em vez de falhar em silêncio.
     throw error;
   }

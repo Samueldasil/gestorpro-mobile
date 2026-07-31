@@ -1,4 +1,5 @@
 import { saveBudgetService } from '../services/budgetService';
+import { toNumber } from '../utils/validators';
 
 /**
  * Controller para lógica de salvar orçamento
@@ -23,15 +24,26 @@ export async function saveBudgetController(payload, token) {
     throw err;
   }
 
-  // Preflight: ensure numeric fields are numbers
-  payload.qtdProduto = Number(payload.qtdProduto) || 0;
-  payload.precoVendaValor = Number(payload.precoVendaValor) || 0;
-  payload.imposto = Number(payload.imposto) || 0;
-  payload.tempoPreparo = Number(payload.tempoPreparo) || 0;
-  payload.custoManual = Number(payload.custoManual) || 0;
+  // Preflight: ensure numeric fields are numbers.
+  // Cópia em vez de mutação: alterar o objeto do chamador mudava o estado da
+  // tela por baixo dos panos.
+  const payloadNormalizado = {
+    ...payload,
+    qtdProduto: toNumber(payload.qtdProduto),
+    precoVendaValor: toNumber(payload.precoVendaValor),
+    imposto: toNumber(payload.imposto),
+    tempoPreparo: toNumber(payload.tempoPreparo),
+    custoManual: toNumber(payload.custoManual),
+    insumos: payload.insumos.map((insumo) => ({
+      ...insumo,
+      preco: toNumber(insumo?.preco),
+      qtdLote: toNumber(insumo?.qtdLote),
+      qtdUsada: toNumber(insumo?.qtdUsada),
+    })),
+  };
 
   // Delegate to service
-  const response = await saveBudgetService(payload, token);
+  const response = await saveBudgetService(payloadNormalizado, token);
   return response;
 }
 

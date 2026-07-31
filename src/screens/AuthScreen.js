@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator
 } from 'react-native';
@@ -14,14 +14,18 @@ export default function AuthScreen({ isDarkMode, onToggleDarkMode, onShowToast, 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false); // Trava síncrona contra duplo clique
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false); // Trava síncrona contra duplo clique
   const [showPassword, setShowPassword] = useState(false); // Controla visibilidade do texto da senha
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Validações centralizadas
 
   const handleSubmit = async () => {
-    if (isSubmitting) return;
+    // O estado só muda no próximo render: dois toques no mesmo frame passavam
+    // pela trava e disparavam duas requisições de login/cadastro.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -54,6 +58,13 @@ export default function AuthScreen({ isDarkMode, onToggleDarkMode, onShowToast, 
         // CÓDIGO LIMPO E PADRONIZADO! Usando a central da API
         // Sem logs aqui: e-mail e token apareceriam no logcat de builds release.
         const data = await loginUser(email.trim(), password);
+
+        // Resposta fora do formato esperado estourava um TypeError aqui dentro
+        // e o usuário via apenas "Credenciais inválidas", sem pista do motivo real.
+        if (!data?.token || !data?.user) {
+          throw new Error('O servidor não retornou os dados de acesso. Tente novamente.');
+        }
+
         await login(data.user, data.token);
         onShowToast?.('Bem-vindo de volta!', 'success');
       } else {
@@ -68,6 +79,7 @@ export default function AuthScreen({ isDarkMode, onToggleDarkMode, onShowToast, 
       console.warn('Falha na autenticação:', error?.message);
       onShowToast?.(error.message || 'Erro na autenticação.', 'error');
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };

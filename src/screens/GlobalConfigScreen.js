@@ -4,24 +4,23 @@ import {
   StyleSheet, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import { sanitizeNumber, toNumber } from '../utils/validators';
 
-export default function GlobalConfigScreen({ configGlobal, onSave, onBack, isDarkMode, onShowToast }) {
+export default function GlobalConfigScreen({ configGlobal, onSave, onBack, isDarkMode }) {
   // Estado local para os inputs, inicializado com os valores globais do App.js
   const [config, setConfig] = useState({
-    gas: configGlobal?.gas || '',
-    luz: configGlobal?.luz || '',
-    agua: configGlobal?.agua || '',
-    horas: configGlobal?.horas || '',
+    gas: configGlobal?.gas ?? '',
+    luz: configGlobal?.luz ?? '',
+    agua: configGlobal?.agua ?? '',
+    horas: configGlobal?.horas ?? '',
   });
 
-  // Impede a entrada de números negativos ou notação científica nos campos
-  const handleBlockNegative = (value) => value.replace(/[-eE]/g, '');
-
-  // Salva as alterações e retorna para a tela anterior
+  // O campo aceitava "150,50", mas o cálculo lia Number("150,50") = NaN e
+  // zerava o custo operacional sem avisar ninguém. Agora normalizamos na entrada.
   const handleSave = () => {
-    onSave(config);
-    onShowToast?.('Custos salvos com sucesso!', 'success');
-    onBack();
+    // Quem salva é o ProfileScreen: ele mostra o toast e fecha a tela.
+    // Duplicar isso aqui exibia dois toasts e gravava a config duas vezes.
+    onSave?.(config);
   };
 
   const fields = [
@@ -31,11 +30,11 @@ export default function GlobalConfigScreen({ configGlobal, onSave, onBack, isDar
     { key: 'horas', label: 'Horas Trabalhadas/Mês', icon: 'clock-outline', color: '#8b5cf6', placeholder: '0' },
   ];
 
-  // Cálculo rápido para exibição na prévia
-  const totalContas =
-    (parseFloat(config.gas) || 0) + (parseFloat(config.luz) || 0) + (parseFloat(config.agua) || 0);
+  // Cálculo rápido para exibição na prévia — mesma conversão usada no cálculo real
+  const totalContas = toNumber(config.gas) + toNumber(config.luz) + toNumber(config.agua);
+  const horas = toNumber(config.horas);
   // Divide o total pelo tempo produtivo em minutos
-  const custoPorMinuto = config.horas > 0 ? totalContas / (parseFloat(config.horas) * 60) : 0;
+  const custoPorMinuto = horas > 0 ? totalContas / (horas * 60) : 0;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -65,8 +64,9 @@ export default function GlobalConfigScreen({ configGlobal, onSave, onBack, isDar
                 <TextInput
                   style={[styles.fieldInput, isDarkMode && styles.fieldInputDark]}
                   placeholder={field.placeholder}
-                  value={String(config[field.key])}
-                  onChangeText={(text) => setConfig(prev => ({ ...prev, [field.key]: handleBlockNegative(text) }))}
+                  placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'}
+                  value={String(config[field.key] ?? '')}
+                  onChangeText={(text) => setConfig(prev => ({ ...prev, [field.key]: sanitizeNumber(text) }))}
                   keyboardType="numeric"
                 />
               </View>
@@ -74,7 +74,7 @@ export default function GlobalConfigScreen({ configGlobal, onSave, onBack, isDar
           ))}
         </View>
 
-        {totalContas > 0 && config.horas > 0 && (
+        {totalContas > 0 && horas > 0 && (
           <View style={[styles.previewCard, isDarkMode && styles.previewCardDark]}>
             <Text style={[styles.previewTitle, isDarkMode && styles.previewTitleDark]}>Prévia do Rateio</Text>
             <View style={styles.previewRow}>

@@ -2,10 +2,20 @@
  * Realiza os cálculos de precificação do GestorPro com blindagem nativa
  */
 
-const safeNum = (val, fallback = 0) => {
-  if (val === null || val === undefined || val === '') return fallback;
-  const parsed = Number(val);
-  return isNaN(parsed) ? fallback : parsed;
+import { toNumber } from './validators';
+
+// Aceita tanto número quanto texto digitado ("12,5"), sem devolver NaN.
+const safeNum = (val, fallback = 0) => toNumber(val, fallback);
+
+/**
+ * Custo proporcional de um insumo dentro da receita.
+ * Protegido contra lote zerado/ausente (evitava NaN e Infinity na tela e no PDF).
+ */
+export const custoInsumo = (item) => {
+  const preco = safeNum(item?.preco, 0);
+  const lote = safeNum(item?.qtdLote, 0);
+  const usada = safeNum(item?.qtdUsada, 0);
+  return lote > 0 ? (preco / lote) * usada : 0;
 };
 
 // Fatores para converter o rendimento até a unidade em que o preço foi informado.
@@ -30,13 +40,13 @@ const converterRendimento = (qtd, unidadeProduto, unidadePreco) => {
   return (qtd * origem.fator) / destino.fator;
 };
 
-export const calcularOrcamento = (data) => {
+export const calcularOrcamento = (data = {}) => {
   const {
     insumos = [],
     modoCusto = 'automatico',
     tempoPreparo = 0,
     custoManual = 0,
-    configGlobal = {},
+    configGlobal,
     imposto = 0,
     precoVendaValor = 0,
     precoVendaTipo = 'total',
@@ -45,22 +55,19 @@ export const calcularOrcamento = (data) => {
   } = data;
 
   // 1. Custo de Produção (Ingredientes)
-  const custoIngredientes = insumos.reduce((acc, item) => {
-    const preco = safeNum(item.preco, 0);
-    const lote = safeNum(item.qtdLote, 1); 
-    const usada = safeNum(item.qtdUsada, 0);
-    
-    const precoUnitario = lote > 0 ? preco / lote : 0;
-    return acc + (precoUnitario * usada);
-  }, 0);
+  const listaInsumos = Array.isArray(insumos) ? insumos : [];
+  const custoIngredientes = listaInsumos.reduce((acc, item) => acc + custoInsumo(item), 0);
 
   // 2. Custos Fixos (Operacional)
+  // configGlobal pode chegar null vindo do AsyncStorage — ler .gas nele quebrava o cálculo.
+  const contas = configGlobal && typeof configGlobal === 'object' ? configGlobal : {};
+
   let valorOperacional = 0;
   if (modoCusto === 'automatico') {
-    const totalContas = safeNum(configGlobal.gas, 0) + 
-                        safeNum(configGlobal.luz, 0) + 
-                        safeNum(configGlobal.agua, 0);
-    const horasMensais = safeNum(configGlobal.horas, 0);
+    const totalContas = safeNum(contas.gas, 0) +
+                        safeNum(contas.luz, 0) +
+                        safeNum(contas.agua, 0);
+    const horasMensais = safeNum(contas.horas, 0);
     
     const custoPorMinuto = horasMensais > 0 ? totalContas / (horasMensais * 60) : 0;
     valorOperacional = custoPorMinuto * safeNum(tempoPreparo, 0);
