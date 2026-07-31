@@ -2,6 +2,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { formatMoney, formatDate } from './format';
 import { custoInsumo } from './calculator';
+import { MODO_CUSTO } from '../config/constants';
 import { reportError } from './errorHandler';
 
 // Escapa o que vem do usuário antes de entrar no HTML do relatório.
@@ -78,7 +79,7 @@ export const generateAndPreviewReport = async (orcamento) => {
         </div>
         <div class="info-box">
           <div class="info-label">Custo Operacional</div>
-          <div class="info-value">${orcamento.modoCusto === 'automatico' ? 'Automático' : 'Manual'}</div>
+          <div class="info-value">${orcamento.modoCusto === MODO_CUSTO.AUTOMATICO ? 'Automático' : 'Manual'}</div>
         </div>
       </div>
 
@@ -108,7 +109,7 @@ export const generateAndPreviewReport = async (orcamento) => {
           <span>${formatMoney(result.custoIngredientes || 0)}</span>
         </div>
         <div class="total-row">
-          <span>Custos Operacionais (${orcamento.modoCusto === 'automatico' ? esc(orcamento.tempoPreparo ?? 0) + 'min' : 'Fixo'}):</span>
+          <span>Custos Operacionais (${orcamento.modoCusto === MODO_CUSTO.AUTOMATICO ? esc(orcamento.tempoPreparo ?? 0) + 'min' : 'Fixo'}):</span>
           <span>${formatMoney(result.valorOperacional || 0)}</span>
         </div>
         <div class="total-row">

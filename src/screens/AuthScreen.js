@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, memo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator
 } from 'react-native';
@@ -8,7 +8,7 @@ import LogoBadge from '../components/LogoBadge';
 import { validateEmail, validatePassword, validatePasswordMatch } from '../utils/validators';
 import { useAuth } from '../contexts/AuthContext';
 
-export default function AuthScreen({ isDarkMode, onToggleDarkMode, onShowToast, onShowForgot }) {
+function AuthScreen({ isDarkMode, onToggleDarkMode, onShowToast, onShowForgot }) {
   const [mode, setMode] = useState('login');
   const { login } = useAuth();
   const [email, setEmail] = useState('');
@@ -176,6 +176,8 @@ export default function AuthScreen({ isDarkMode, onToggleDarkMode, onShowToast, 
     </View>
   );
 }
+
+export default memo(AuthScreen);
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', backgroundColor: '#f8fafc', padding: 16 },

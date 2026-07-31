@@ -3,6 +3,7 @@
  */
 
 import { toNumber } from './validators';
+import { MINUTES_PER_HOUR, MODO_CUSTO } from '../config/constants';
 
 // Aceita tanto número quanto texto digitado ("12,5"), sem devolver NaN.
 const safeNum = (val, fallback = 0) => toNumber(val, fallback);
@@ -43,7 +44,7 @@ const converterRendimento = (qtd, unidadeProduto, unidadePreco) => {
 export const calcularOrcamento = (data = {}) => {
   const {
     insumos = [],
-    modoCusto = 'automatico',
+    modoCusto = MODO_CUSTO.AUTOMATICO,
     tempoPreparo = 0,
     custoManual = 0,
     configGlobal,
@@ -63,13 +64,13 @@ export const calcularOrcamento = (data = {}) => {
   const contas = configGlobal && typeof configGlobal === 'object' ? configGlobal : {};
 
   let valorOperacional = 0;
-  if (modoCusto === 'automatico') {
+  if (modoCusto === MODO_CUSTO.AUTOMATICO) {
     const totalContas = safeNum(contas.gas, 0) +
                         safeNum(contas.luz, 0) +
                         safeNum(contas.agua, 0);
     const horasMensais = safeNum(contas.horas, 0);
-    
-    const custoPorMinuto = horasMensais > 0 ? totalContas / (horasMensais * 60) : 0;
+
+    const custoPorMinuto = horasMensais > 0 ? totalContas / (horasMensais * MINUTES_PER_HOUR) : 0;
     valorOperacional = custoPorMinuto * safeNum(tempoPreparo, 0);
   } else {
     valorOperacional = safeNum(custoManual, 0);

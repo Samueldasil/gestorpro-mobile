@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, ActivityIndicator, Modal
@@ -11,51 +11,58 @@ import { sanitizeNumber, validateInsumo, toNumber } from '../utils/validators';
 import { saveBudgetController } from '../controllers/budgetController';
 import { useAuth } from '../contexts/AuthContext';
 import { reportError } from '../utils/errorHandler';
+import {
+  MAPA_UNIDADES, TIPOS_PRECO, UNIDADES_PRODUTO, UNIDADES_LOTE, UNIDADES_USADA, MODO_CUSTO
+} from '../config/constants';
+import { ESTADOS_TAXAS } from '../config/taxasEstaduais';
 
-// Dicionário visual para deixar a lista de ingredientes elegante
-const MAPA_UNIDADES = {
-  un: 'Unidades',
-  g: 'Gramas',
-  kg: 'Quilos',
-  ml: 'Mililitros',
-  l: 'Litros'
-};
+// Linha do modal de impostos. Memoizada: os 27 estados eram reconstruídos
+// inteiros a cada render do BudgetScreen, mesmo com o modal fechado.
+const LinhaEstado = memo(function LinhaEstado({ estado, isDarkMode, onSelect }) {
+  return (
+    <TouchableOpacity
+      style={[styles.stateItem, isDarkMode && styles.stateItemDark]}
+      onPress={() => onSelect(estado)}
+    >
+      <View>
+        <Text style={[styles.stateName, isDarkMode && styles.stateNameDark]}>
+          {estado.nome} ({estado.uf})
+        </Text>
+        <Text style={[styles.stateTaxInfo, isDarkMode && styles.stateTaxInfoDark]}>
+          ICMS Alimentação: {estado.taxa}%
+        </Text>
+      </View>
+      <View style={styles.stateTotalBadge}>
+        <Text style={styles.stateTotalText}>{estado.totalFormatado}%</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
-// =====================================================================
-// PLANILHA TRIBUTÁRIA NACIONAL (Regime Especial + Federal)
-// =====================================================================
-const FEDERAL_TAX = 3.65; // PIS + COFINS
-const ESTADOS_TAXAS = [
-  { uf: 'AC', nome: 'Acre', taxa: 3.5 },
-  { uf: 'AL', nome: 'Alagoas', taxa: 4.0 },
-  { uf: 'AP', nome: 'Amapá', taxa: 3.0 },
-  { uf: 'AM', nome: 'Amazonas', taxa: 3.2 },
-  { uf: 'BA', nome: 'Bahia', taxa: 4.0 },
-  { uf: 'CE', nome: 'Ceará', taxa: 3.2 },
-  { uf: 'DF', nome: 'Distrito Federal', taxa: 2.0 },
-  { uf: 'ES', nome: 'Espírito Santo', taxa: 3.2 },
-  { uf: 'GO', nome: 'Goiás', taxa: 7.0 },
-  { uf: 'MA', nome: 'Maranhão', taxa: 3.0 },
-  { uf: 'MT', nome: 'Mato Grosso', taxa: 3.2 },
-  { uf: 'MS', nome: 'Mato Grosso do Sul', taxa: 3.2 },
-  { uf: 'MG', nome: 'Minas Gerais', taxa: 3.0 },
-  { uf: 'PA', nome: 'Pará', taxa: 4.0 },
-  { uf: 'PB', nome: 'Paraíba', taxa: 4.0 },
-  { uf: 'PR', nome: 'Paraná', taxa: 3.2 },
-  { uf: 'PE', nome: 'Pernambuco', taxa: 4.0 },
-  { uf: 'PI', nome: 'Piauí', taxa: 4.0 },
-  { uf: 'RJ', nome: 'Rio de Janeiro', taxa: 3.0 },
-  { uf: 'RN', nome: 'Rio Grande do Norte', taxa: 4.0 },
-  { uf: 'RS', nome: 'Rio Grande do Sul', taxa: 4.8 },
-  { uf: 'RO', nome: 'Rondônia', taxa: 3.2 },
-  { uf: 'RR', nome: 'Roraima', taxa: 4.0 },
-  { uf: 'SC', nome: 'Santa Catarina', taxa: 3.2 },
-  { uf: 'SP', nome: 'São Paulo', taxa: 4.0 },
-  { uf: 'SE', nome: 'Sergipe', taxa: 4.0 },
-  { uf: 'TO', nome: 'Tocantins', taxa: 4.0 }
-];
+// Linha de ingrediente já adicionado — mesma razão: não precisa redesenhar
+// quando o usuário digita em qualquer outro campo da tela.
+const LinhaInsumo = memo(function LinhaInsumo({ item, isDarkMode, onRemove }) {
+  return (
+    <View style={[styles.ingredientRow, isDarkMode && styles.ingredientRowDark]}>
+      <View>
+        <Text style={[styles.ingredientName, isDarkMode && styles.ingredientNameDark]}>{item.nome}</Text>
+        <Text style={[styles.ingredientMeta, isDarkMode && styles.ingredientMetaDark]}>
+          {MAPA_UNIDADES[item.unidadeUsada] || 'Quantidade'} usadas: {item.qtdUsada}
+        </Text>
+      </View>
+      <View style={styles.ingredientActions}>
+        <Text style={[styles.ingredientValue, isDarkMode && styles.ingredientValueDark]}>
+          {formatMoney(custoInsumo(item))}
+        </Text>
+        <TouchableOpacity onPress={() => onRemove(item.id)}>
+          <Feather name="trash-2" size={18} color={isDarkMode ? '#fda4af' : '#ef4444'} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
 
-export default function BudgetScreen({
+function BudgetScreen({
   token, onBudgetSaved, isDarkMode, onShowToast, configGlobal, initialBudget, onClearEditing
 }) {
   const auth = useAuth();
@@ -67,7 +74,7 @@ export default function BudgetScreen({
   const [precoVendaValor, setPrecoVendaValor] = useState('');
   const [precoVendaTipo, setPrecoVendaTipo] = useState('total');
   const [imposto, setImposto] = useState('');
-  const [modoCusto, setModoCusto] = useState('automatico');
+  const [modoCusto, setModoCusto] = useState(MODO_CUSTO.AUTOMATICO);
   const [tempoPreparo, setTempoPreparo] = useState('');
   const [custoManual, setCustoManual] = useState('');
   const [insumos, setInsumos] = useState([]); 
@@ -96,7 +103,7 @@ export default function BudgetScreen({
     setPrecoVendaValor(initialBudget.precoVendaValor?.toString() ?? '');
     setPrecoVendaTipo(initialBudget.precoVendaTipo || 'total');
     setImposto(initialBudget.imposto?.toString() ?? '');
-    setModoCusto(initialBudget.modoCusto || 'automatico');
+    setModoCusto(initialBudget.modoCusto || MODO_CUSTO.AUTOMATICO);
     setTempoPreparo(initialBudget.tempoPreparo?.toString() ?? '');
     setCustoManual(initialBudget.custoManual?.toString() ?? '');
 
@@ -115,7 +122,7 @@ export default function BudgetScreen({
     );
   }, [initialBudget]);
 
-  const adicionarInsumo = () => {
+  const adicionarInsumo = useCallback(() => {
     // Validação centralizada em validators.js, em vez de duplicada aqui.
     const erro = validateInsumo(novoInsumo);
     if (erro) {
@@ -137,11 +144,19 @@ export default function BudgetScreen({
 
     setNovoInsumo({ nome: '', preco: '', qtdLote: '', unidadeLote: 'kg', qtdUsada: '', unidadeUsada: 'g' });
     setShowAdicionarInsumo(false);
-  };
+  }, [novoInsumo, onShowToast]);
 
-  const removerInsumo = (id) => {
+  // Identidade estável: sem isso o memo de LinhaInsumo nunca economizaria nada.
+  const removerInsumo = useCallback((id) => {
     setInsumos(prev => prev.filter(item => item.id !== id));
-  };
+  }, []);
+
+  const aplicarImpostoEstado = useCallback((estado) => {
+    // Vírgula em vez de ponto para manter o padrão brasileiro no input
+    setImposto(estado.totalFormatado.replace('.', ','));
+    setShowTaxModal(false);
+    onShowToast?.(`Imposto de ${estado.totalFormatado}% sugerido para ${estado.uf}`, 'success');
+  }, [onShowToast]);
 
   const preview = useMemo(() => {
     const data = {
@@ -196,7 +211,7 @@ export default function BudgetScreen({
 
   const limparFormulario = () => {
     setNomeProduto(''); setQtdProduto(''); setUnidadeProduto('un'); setPrecoVendaValor(''); setPrecoVendaTipo('total');
-    setImposto(''); setModoCusto('automatico'); setTempoPreparo(''); setCustoManual(''); setInsumos([]); setIsEditing(false);
+    setImposto(''); setModoCusto(MODO_CUSTO.AUTOMATICO); setTempoPreparo(''); setCustoManual(''); setInsumos([]); setIsEditing(false);
     if (onClearEditing) onClearEditing();
   };
 
@@ -225,7 +240,7 @@ export default function BudgetScreen({
               <Text style={[styles.label, isDarkMode && styles.labelDark]}>Unidade</Text>
               <View style={[styles.pickerWrapper, isDarkMode && styles.pickerWrapperDark]}>
                 <Picker selectedValue={unidadeProduto} onValueChange={setUnidadeProduto} style={[styles.picker, isDarkMode && styles.pickerDark]} dropdownIconColor={isDarkMode ? '#94a3b8' : '#64748b'}>
-                  {['un', 'kg', 'g', 'l', 'ml'].map(u => <Picker.Item key={u} label={u} value={u} />)}
+                  {UNIDADES_PRODUTO.map(u => <Picker.Item key={u} label={u} value={u} />)}
                 </Picker>
               </View>
             </View>
@@ -240,7 +255,7 @@ export default function BudgetScreen({
               <Text style={[styles.label, isDarkMode && styles.labelDark]}>Tipo de preço</Text>
               <View style={[styles.pickerWrapper, isDarkMode && styles.pickerWrapperDark]}>
                 <Picker selectedValue={precoVendaTipo} onValueChange={setPrecoVendaTipo} style={[styles.picker, isDarkMode && styles.pickerDark]}>
-                  {[{ label: 'Receita total', value: 'total' }, { label: 'por Kg', value: 'kg' }, { label: 'por Litro', value: 'l' }, { label: 'por Unidade', value: 'un' }].map(t => <Picker.Item key={t.value} label={t.label} value={t.value} />)}
+                  {TIPOS_PRECO.map(t => <Picker.Item key={t.value} label={t.label} value={t.value} />)}
                 </Picker>
               </View>
             </View>
@@ -288,31 +303,16 @@ export default function BudgetScreen({
                 <TextInput style={[styles.input, styles.flex, isDarkMode && styles.inputDark]} placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} placeholder="Qtd lote" keyboardType="numeric" value={novoInsumo.qtdLote} onChangeText={text => setNovoInsumo(prev => ({ ...prev, qtdLote: sanitizeNumber(text) }))} />
               </View>
               <View style={styles.gridRow}>
-                <View style={[styles.flex, { marginRight: 8 }]}><Text style={styles.smallLabel}>Unid. lote</Text><Picker selectedValue={novoInsumo.unidadeLote} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeLote: val }))} style={[styles.smallPicker, isDarkMode && styles.pickerDark]} dropdownIconColor={isDarkMode ? '#94a3b8' : '#64748b'}><Picker.Item label="kg" value="kg" /><Picker.Item label="g" value="g" /><Picker.Item label="l" value="l" /><Picker.Item label="ml" value="ml" /><Picker.Item label="un" value="un" /></Picker></View>
+                <View style={[styles.flex, { marginRight: 8 }]}><Text style={styles.smallLabel}>Unid. lote</Text><Picker selectedValue={novoInsumo.unidadeLote} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeLote: val }))} style={[styles.smallPicker, isDarkMode && styles.pickerDark]} dropdownIconColor={isDarkMode ? '#94a3b8' : '#64748b'}>{UNIDADES_LOTE.map(u => <Picker.Item key={u} label={u} value={u} />)}</Picker></View>
                 <View style={[styles.flex, { marginRight: 8 }]}><Text style={styles.smallLabel}>Qtd usada</Text><TextInput placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} style={[styles.input, isDarkMode && styles.inputDark]} placeholder="Qtd" keyboardType="numeric" value={novoInsumo.qtdUsada} onChangeText={text => setNovoInsumo(prev => ({ ...prev, qtdUsada: sanitizeNumber(text) }))} /></View>
-                <View style={styles.flex}><Text style={styles.smallLabel}>Unid. usada</Text><Picker selectedValue={novoInsumo.unidadeUsada} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeUsada: val }))} style={[styles.smallPicker, isDarkMode && styles.pickerDark]} dropdownIconColor={isDarkMode ? '#94a3b8' : '#64748b'}><Picker.Item label="g" value="g" /><Picker.Item label="kg" value="kg" /><Picker.Item label="ml" value="ml" /><Picker.Item label="l" value="l" /><Picker.Item label="un" value="un" /></Picker></View>
+                <View style={styles.flex}><Text style={styles.smallLabel}>Unid. usada</Text><Picker selectedValue={novoInsumo.unidadeUsada} onValueChange={val => setNovoInsumo(prev => ({ ...prev, unidadeUsada: val }))} style={[styles.smallPicker, isDarkMode && styles.pickerDark]} dropdownIconColor={isDarkMode ? '#94a3b8' : '#64748b'}>{UNIDADES_USADA.map(u => <Picker.Item key={u} label={u} value={u} />)}</Picker></View>
               </View>
               <TouchableOpacity style={[styles.secondaryButton, isDarkMode && styles.secondaryButtonDark]} onPress={adicionarInsumo}><Text style={[styles.secondaryButtonText, isDarkMode && styles.secondaryButtonTextDark]}>Adicionar</Text></TouchableOpacity>
             </View>
           )}
 
           {insumos.map(item => (
-            <View key={item.id} style={[styles.ingredientRow, isDarkMode && styles.ingredientRowDark]}>
-              <View>
-                <Text style={[styles.ingredientName, isDarkMode && styles.ingredientNameDark]}>{item.nome}</Text>
-                <Text style={[styles.ingredientMeta, isDarkMode && styles.ingredientMetaDark]}>
-                  {MAPA_UNIDADES[item.unidadeUsada] || 'Quantidade'} usadas: {item.qtdUsada}
-                </Text>
-              </View>
-              <View style={styles.ingredientActions}>
-                <Text style={[styles.ingredientValue, isDarkMode && styles.ingredientValueDark]}>
-                  {formatMoney(custoInsumo(item))}
-                </Text>
-                <TouchableOpacity onPress={() => removerInsumo(item.id)}>
-                  <Feather name="trash-2" size={18} color={isDarkMode ? '#fda4af' : '#ef4444'} />
-                </TouchableOpacity>
-              </View>
-            </View>
+            <LinhaInsumo key={item.id} item={item} isDarkMode={isDarkMode} onRemove={removerInsumo} />
           ))}
           {insumos.length === 0 && <Text style={[styles.emptyText, isDarkMode && styles.emptyTextDark]}>Nenhum ingrediente adicionado ainda.</Text>}
         </View>
@@ -325,10 +325,10 @@ export default function BudgetScreen({
             </View>
           </View>
           <View style={styles.toggleRow}>
-            <TouchableOpacity onPress={() => setModoCusto('automatico')} style={[styles.modeButton, modoCusto === 'automatico' && styles.modeButtonActive, { marginRight: 10 }]}><Text style={[styles.modeLabel, modoCusto === 'automatico' && styles.modeLabelActive]}>Automático</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => setModoCusto('manual')} style={[styles.modeButton, modoCusto === 'manual' && styles.modeButtonActive, isDarkMode && modoCusto !== 'manual' && { backgroundColor: '#1e293b' }]}><Text style={[styles.modeLabel, modoCusto === 'manual' && styles.modeLabelActive, isDarkMode && modoCusto !== 'manual' && { color: '#ffffff' }]}>Manual</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setModoCusto(MODO_CUSTO.AUTOMATICO)} style={[styles.modeButton, modoCusto === MODO_CUSTO.AUTOMATICO && styles.modeButtonActive, { marginRight: 10 }]}><Text style={[styles.modeLabel, modoCusto === MODO_CUSTO.AUTOMATICO && styles.modeLabelActive]}>Automático</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setModoCusto(MODO_CUSTO.MANUAL)} style={[styles.modeButton, modoCusto === MODO_CUSTO.MANUAL && styles.modeButtonActive, isDarkMode && modoCusto !== MODO_CUSTO.MANUAL && { backgroundColor: '#1e293b' }]}><Text style={[styles.modeLabel, modoCusto === MODO_CUSTO.MANUAL && styles.modeLabelActive, isDarkMode && modoCusto !== MODO_CUSTO.MANUAL && { color: '#ffffff' }]}>Manual</Text></TouchableOpacity>
           </View>
-          {modoCusto === 'automatico' ? (
+          {modoCusto === MODO_CUSTO.AUTOMATICO ? (
             <TextInput style={[styles.input, isDarkMode && styles.inputDark]} placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} placeholder="Tempo de preparo (minutos)" keyboardType="numeric" value={tempoPreparo} onChangeText={text => setTempoPreparo(sanitizeNumber(text))} />
           ) : (
             <TextInput style={[styles.input, isDarkMode && styles.inputDark]} placeholderTextColor={isDarkMode ? '#64748b' : '#94a3b8'} placeholder="Custo fixo (R$)" keyboardType="numeric" value={custoManual} onChangeText={text => setCustoManual(sanitizeNumber(text))} />
@@ -396,33 +396,14 @@ export default function BudgetScreen({
             </Text>
             
             <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
-              {ESTADOS_TAXAS.map(estado => {
-                const totalTax = (estado.taxa + FEDERAL_TAX).toFixed(2);
-                return (
-                  <TouchableOpacity
-                    key={estado.uf}
-                    style={[styles.stateItem, isDarkMode && styles.stateItemDark]}
-                    onPress={() => {
-                      // Substitui o ponto por vírgula para manter o padrão brasileiro no input
-                      setImposto(totalTax.replace('.', ','));
-                      setShowTaxModal(false);
-                      onShowToast?.(`Imposto de ${totalTax}% sugerido para ${estado.uf}`, 'success');
-                    }}
-                  >
-                    <View>
-                      <Text style={[styles.stateName, isDarkMode && styles.stateNameDark]}>
-                        {estado.nome} ({estado.uf})
-                      </Text>
-                      <Text style={[styles.stateTaxInfo, isDarkMode && styles.stateTaxInfoDark]}>
-                        ICMS Alimentação: {estado.taxa}%
-                      </Text>
-                    </View>
-                    <View style={styles.stateTotalBadge}>
-                      <Text style={styles.stateTotalText}>{totalTax}%</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+              {ESTADOS_TAXAS.map(estado => (
+                <LinhaEstado
+                  key={estado.uf}
+                  estado={estado}
+                  isDarkMode={isDarkMode}
+                  onSelect={aplicarImpostoEstado}
+                />
+              ))}
             </ScrollView>
           </View>
         </View>
@@ -430,6 +411,10 @@ export default function BudgetScreen({
     </>
   );
 }
+
+// memo: o App re-renderiza a cada toast e a cada troca de aba; sem isto a tela
+// inteira de orçamento era reconstruída junto, mesmo sem nada dela mudar.
+export default memo(BudgetScreen);
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f8fafc' }, screenDark: { backgroundColor: '#020617' },

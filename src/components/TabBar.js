@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -8,7 +8,7 @@ const tabs = [
   { id: 'macro', label: 'Macro', icon: 'chart-bar' } // Ícone ajustado
 ];
 
-export default function TabBar({ activeTab, onChangeTab, isDarkMode }) {
+function TabBar({ activeTab, onChangeTab, isDarkMode }) {
   return (
     <View style={[styles.container, isDarkMode && styles.containerDark]}>
       {tabs.map((tab) => {
@@ -39,6 +39,8 @@ export default function TabBar({ activeTab, onChangeTab, isDarkMode }) {
     </View>
   );
 }
+
+export default memo(TabBar);
 
 const styles = StyleSheet.create({
   container: {

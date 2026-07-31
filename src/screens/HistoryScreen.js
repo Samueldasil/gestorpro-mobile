@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, memo } from 'react';
 import {
   View, Text, TouchableOpacity, FlatList, StyleSheet,
   ScrollView, ActivityIndicator, Alert
@@ -9,17 +9,35 @@ import { exportBudgetsToCSV } from '../utils/csvExporter';
 import { generateAndPreviewReport, generateSummaryPDF } from '../utils/pdfGenerator';
 import { reportError } from '../utils/errorHandler';
 import { toNumber } from '../utils/validators';
+import { MAPA_UNIDADES, MODO_CUSTO } from '../config/constants';
 
-// Dicionário visual para deixar a lista de ingredientes elegante
-const MAPA_UNIDADES = {
-  un: 'Unidades',
-  g: 'Gramas',
-  kg: 'Quilos',
-  ml: 'Mililitros',
-  l: 'Litros'
-};
+// Linha da lista extraída e memoizada. Antes o renderItem era uma arrow criada
+// a cada render: o FlatList perdia a comparação e redesenhava TODOS os cards
+// sempre que qualquer estado da tela mudava.
+const CardOrcamento = memo(function CardOrcamento({ item, isDarkMode, onSelect }) {
+  return (
+    <TouchableOpacity
+      style={[styles.card, isDarkMode && styles.cardDark]}
+      // Itens sem id não têm detalhe estável para abrir.
+      disabled={item?.id == null}
+      onPress={() => onSelect(item?.id)}
+    >
+      <View>
+        <Text style={[styles.cardTitle, isDarkMode && styles.cardTitleDark]}>
+          {item.nome || 'Sem nome'}
+        </Text>
+        <Text style={[styles.cardSubtitle, isDarkMode && styles.cardSubtitleDark]}>
+          {formatDate(item.createdAt || item.created_at)}
+        </Text>
+      </View>
+      <Text style={[styles.cardValue, isDarkMode && styles.cardValueDark]}>
+        {formatMoney(item.result?.custoTotal || 0)}
+      </Text>
+    </TouchableOpacity>
+  );
+});
 
-export default function HistoryScreen({
+function HistoryScreen({
   budgets,
   loading,
   isDarkMode,
@@ -38,7 +56,27 @@ export default function HistoryScreen({
     [lista, selectedId]
   );
 
-  const handleExport = async () => {
+  // Identidades estáveis para a FlatList e para o memo do CardOrcamento.
+  const keyExtractor = useCallback(
+    (item, index) => (item?.id != null ? String(item.id) : `budget-${index}`),
+    []
+  );
+
+  const renderItem = useCallback(
+    ({ item }) => <CardOrcamento item={item} isDarkMode={isDarkMode} onSelect={setSelectedId} />,
+    [isDarkMode]
+  );
+
+  const listaVazia = useMemo(
+    () => (
+      <Text style={[styles.emptyText, isDarkMode && styles.emptyTextDark]}>
+        Nenhum orçamento salvo.
+      </Text>
+    ),
+    [isDarkMode]
+  );
+
+  const handleExport = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
     try {
@@ -49,17 +87,17 @@ export default function HistoryScreen({
     } finally {
       setExporting(false);
     }
-  };
+  }, [exporting, lista]);
 
   // Exportações individuais também precisam avisar quando falham.
-  const runExport = async (task, fallbackMessage) => {
+  const runExport = useCallback(async (task, fallbackMessage) => {
     try {
       await task();
     } catch (error) {
       reportError(error, 'export');
       Alert.alert('Erro', error?.message || fallbackMessage);
     }
-  };
+  }, []);
 
   const confirmDelete = (id, nome) => {
     Alert.alert(
@@ -185,11 +223,11 @@ export default function HistoryScreen({
           </Text>
           <View style={styles.operationalRow}>
             <Text style={[styles.operationalLabel, isDarkMode && styles.operationalLabelDark]}>
-              {item.modoCusto === 'automatico' ? 'Automático' : 'Manual'}
+              {item.modoCusto === MODO_CUSTO.AUTOMATICO ? 'Automático' : 'Manual'}
             </Text>
             {/* O "R$" duplicado foi removido aqui embaixo */}
             <Text style={[styles.operationalValue, isDarkMode && styles.operationalValueDark]}>
-              {item.modoCusto === 'automatico'
+              {item.modoCusto === MODO_CUSTO.AUTOMATICO
                 ? `${item.tempoPreparo || 0} min`
                 : formatMoney(item.custoManual || 0)}
             </Text>
@@ -270,34 +308,16 @@ export default function HistoryScreen({
           ) : (
             <FlatList
               data={lista}
-              keyExtractor={(item, index) => item?.id != null ? String(item.id) : `budget-${index}`}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.card, isDarkMode && styles.cardDark]}
-                  // Itens sem id não têm detalhe estável para abrir.
-                  disabled={item?.id == null}
-                  onPress={() => setSelectedId(item?.id)}
-                >
-                  <View>
-                    <Text style={[styles.cardTitle, isDarkMode && styles.cardTitleDark]}>
-                      {item.nome || 'Sem nome'}
-                    </Text>
-                    <Text
-                      style={[styles.cardSubtitle, isDarkMode && styles.cardSubtitleDark]}
-                    >
-                      {formatDate(item.createdAt || item.created_at)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.cardValue, isDarkMode && styles.cardValueDark]}>
-                    {formatMoney(item.result?.custoTotal || 0)}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              ListEmptyComponent={
-                <Text style={[styles.emptyText, isDarkMode && styles.emptyTextDark]}>
-                  Nenhum orçamento salvo.
-                </Text>
-              }
+              keyExtractor={keyExtractor}
+              renderItem={renderItem}
+              ListEmptyComponent={listaVazia}
+              // Histórico costuma ser longo: renderiza só o que cabe na tela e
+              // libera da memória o que sai dela.
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              windowSize={7}
+              removeClippedSubviews
+              showsVerticalScrollIndicator={false}
             />
           )}
         </>
@@ -305,6 +325,8 @@ export default function HistoryScreen({
     </View>
   );
 }
+
+export default memo(HistoryScreen);
 
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: 16, backgroundColor: '#f8fafc' },

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback, memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { formatMoney } from '../utils/format';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -6,14 +6,14 @@ import MacroReportScreen from './MacroReportScreen';
 import { getMacroSummary, exportCSV as controllerExportCSV, generatePDF as controllerGeneratePDF } from '../controllers/macroController';
 import { reportError } from '../utils/errorHandler';
 
-export default function MacroScreen({ budgets, isDarkMode }) {
+function MacroScreen({ budgets, isDarkMode }) {
   const [showReport, setShowReport] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
-  const lista = Array.isArray(budgets) ? budgets : [];
+  const lista = useMemo(() => (Array.isArray(budgets) ? budgets : []), [budgets]);
 
-  const handleExportCSV = async () => {
+  const handleExportCSV = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
     try {
@@ -24,9 +24,9 @@ export default function MacroScreen({ budgets, isDarkMode }) {
     } finally {
       setExporting(false);
     }
-  };
+  }, [exporting, lista]);
 
-  const handleGeneratePDF = async () => {
+  const handleGeneratePDF = useCallback(async () => {
     // Sem esta trava, toques repetidos abriam vários compartilhamentos em fila.
     if (generatingPdf) return;
     setGeneratingPdf(true);
@@ -38,14 +38,21 @@ export default function MacroScreen({ budgets, isDarkMode }) {
     } finally {
       setGeneratingPdf(false);
     }
-  };
+  }, [generatingPdf, lista]);
+
+  const abrirRelatorio = useCallback(() => setShowReport(true), []);
+  const fecharRelatorio = useCallback(() => setShowReport(false), []);
+
+  // getMacroSummary percorre todos os orçamentos e monta 12 meses de série
+  // histórica; rodava de novo a cada render, inclusive ao abrir o relatório.
+  const { totalRevenue, totalCost, totalProfit, totalBudgets } = useMemo(
+    () => getMacroSummary(lista),
+    [lista]
+  );
 
   if (showReport) {
-    return <MacroReportScreen budgets={lista} onBack={() => setShowReport(false)} isDarkMode={isDarkMode} />;
+    return <MacroReportScreen budgets={lista} onBack={fecharRelatorio} isDarkMode={isDarkMode} />;
   }
-
-  // Use controller para obter resumo
-  const { totalRevenue, totalCost, totalProfit, totalBudgets } = getMacroSummary(lista);
 
   return (
     <View style={[styles.screen, isDarkMode && styles.screenDark]}>
@@ -104,12 +111,14 @@ export default function MacroScreen({ budgets, isDarkMode }) {
         </View>
       </View>
 
-      <TouchableOpacity style={[styles.actionButton, isDarkMode && styles.actionButtonDark]} onPress={() => setShowReport(true)}>
+      <TouchableOpacity style={[styles.actionButton, isDarkMode && styles.actionButtonDark]} onPress={abrirRelatorio}>
         <Text style={styles.actionText}>Ver relatório completo</Text>
       </TouchableOpacity>
     </View>
   );
 }
+
+export default memo(MacroScreen);
 
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: 16, backgroundColor: '#f8fafc' },

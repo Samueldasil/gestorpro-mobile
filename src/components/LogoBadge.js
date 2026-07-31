@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { TouchableOpacity, View, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-export default function LogoBadge({ size = 40, isDarkMode = false, onPress }) {
+function LogoBadge({ size = 40, isDarkMode = false, onPress }) {
   const badgeSize = size;
   const iconSize = size * 0.55;
 
@@ -28,6 +28,8 @@ export default function LogoBadge({ size = 40, isDarkMode = false, onPress }) {
 
   return badge;
 }
+
+export default memo(LogoBadge);
 
 const styles = StyleSheet.create({
   badge: {

@@ -1,4 +1,4 @@
-﻿import React, { Component, useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { Component, useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
   StatusBar,
   View,
@@ -24,6 +24,7 @@ import { getHistory, deleteBudget } from './src/api/api';
 import { setUnauthorizedHandler } from './src/services/apiService';
 import { loadGlobalConfig } from './src/controllers/profileController';
 import { installGlobalErrorHandler, setErrorListener, reportError } from './src/utils/errorHandler';
+import { TOAST_DURATION } from './src/config/constants';
 
 // Instalado antes de qualquer render: erros de callback nativo e promises sem
 // catch passam a ser logados e exibidos em vez de fechar o app sem aviso.
@@ -86,6 +87,26 @@ class AppErrorBoundary extends Component {
   }
 }
 
+// Toast e barra de status extraídos e memoizados: eram JSX duplicado nos dois
+// ramos do render (logado / deslogado) e reconstruídos a cada tecla digitada.
+const Toast = memo(function Toast({ show, msg, type }) {
+  if (!show) return null;
+  return (
+    <View style={[styles.toast, type === 'error' ? styles.toastError : styles.toastSuccess]}>
+      <Text style={styles.toastText}>{msg}</Text>
+    </View>
+  );
+});
+
+const BarraDeStatus = memo(function BarraDeStatus({ isDarkMode }) {
+  return (
+    <StatusBar
+      barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+      backgroundColor={isDarkMode ? '#020617' : '#f8fafc'}
+    />
+  );
+});
+
 function AppContent() {
   // O AuthScreen já chama login() direto pelo contexto — aqui só consumimos o estado.
   const { user, token, logout, loadingAuth } = useAuth();
@@ -123,9 +144,9 @@ function AppContent() {
 
   // O ProfileScreen já grava no AsyncStorage; aqui só espelhamos em memória
   // para não gravar a mesma config duas vezes a cada salvamento.
-  const handleSaveConfigGlobal = (newConfig) => {
+  const handleSaveConfigGlobal = useCallback((newConfig) => {
     setConfigGlobal(newConfig);
-  };
+  }, []);
 
   const toastTimer = useRef(null);
 
@@ -136,7 +157,7 @@ function AppContent() {
     toastTimer.current = setTimeout(() => {
       setToast({ show: false, msg: '', type: 'success' });
       toastTimer.current = null;
-    }, 3000);
+    }, TOAST_DURATION);
   }, []);
 
   useEffect(() => () => {
@@ -188,31 +209,30 @@ function AppContent() {
     };
   }, [token]);
 
-  if (loadingAuth) {
-    return (
-      <SafeAreaView style={[styles.container, isDarkMode && styles.darkBackground]}>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={isDarkMode ? '#020617' : '#f8fafc'} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2563eb" />
-          <Text style={styles.loadingText}>Carregando sua sessão...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const handleLogout = () => {
+  // Todos os handlers abaixo são useCallback e ficam ANTES de qualquer return
+  // condicional: hook depois de `if (loadingAuth) return` mudaria a ordem dos
+  // hooks entre renders e quebraria o React. A identidade estável é o que
+  // permite memoizar as telas — sem ela, cada toast redesenharia tudo.
+  const handleLogout = useCallback(() => {
     logout();
     setActiveTab('orcamento');
     setBudgets([]);
     showToast('Sessão encerrada.');
-  };
+  }, [logout, showToast]);
 
-  const goToHome = () => {
+  const goToHome = useCallback(() => {
     setActiveTab('orcamento');
     setEditingBudget(null);
-  };
+  }, []);
 
-  const handleBudgetSaved = (newBudget) => {
+  const irParaOrcamento = useCallback(() => setActiveTab('orcamento'), []);
+  const irParaPerfil = useCallback(() => setActiveTab('perfil'), []);
+  const alternarTema = useCallback(() => setIsDarkMode((prev) => !prev), []);
+  const abrirEsqueciSenha = useCallback(() => setShowForgot(true), []);
+  const fecharEsqueciSenha = useCallback(() => setShowForgot(false), []);
+  const limparEdicao = useCallback(() => setEditingBudget(null), []);
+
+  const handleBudgetSaved = useCallback((newBudget) => {
     // Resposta fora do formato esperado quebrava aqui dentro do try do
     // BudgetScreen: o orçamento era salvo mas o usuário via "falha ao salvar".
     if (!newBudget || typeof newBudget !== 'object') {
@@ -233,14 +253,14 @@ function AppContent() {
     setActiveTab('historico');
     setEditingBudget(null);
     showToast(wasEditing ? 'Orçamento atualizado!' : 'Orçamento salvo com sucesso!');
-  };
+  }, [editingBudget, showToast]);
 
-  const handleEditBudget = (budget) => {
+  const handleEditBudget = useCallback((budget) => {
     setEditingBudget(budget);
     setActiveTab('orcamento');
-  };
+  }, []);
 
-  const handleDeleteBudget = async (id) => {
+  const handleDeleteBudget = useCallback(async (id) => {
     try {
       await deleteBudget(id);
       setBudgets((prev) => prev.filter((b) => b.id !== id));
@@ -250,24 +270,36 @@ function AppContent() {
       reportError(error, 'deleteBudget');
       showToast(error?.message || 'Erro ao excluir orçamento.', 'error');
     }
-  };
+  }, [showToast]);
 
   // Recebe o histórico já buscado pelo ProfileScreen para não repetir a requisição.
-  const handleClearData = (response) => {
+  const handleClearData = useCallback((response) => {
     setBudgets(response?.budgets || []);
-  };
+  }, []);
+
+  if (loadingAuth) {
+    return (
+      <SafeAreaView style={[styles.container, isDarkMode && styles.darkBackground]}>
+        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={isDarkMode ? '#020617' : '#f8fafc'} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2563eb" />
+          <Text style={styles.loadingText}>Carregando sua sessão...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const renderScreen = () => {
     if (!user) {
       if (showForgot) {
-        return <ForgotPasswordScreen onBack={() => setShowForgot(false)} isDarkMode={isDarkMode} onShowToast={showToast} />;
+        return <ForgotPasswordScreen onBack={fecharEsqueciSenha} isDarkMode={isDarkMode} onShowToast={showToast} />;
       }
       return (
         <AuthScreen
           isDarkMode={isDarkMode}
-          onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
+          onToggleDarkMode={alternarTema}
           onShowToast={showToast}
-          onShowForgot={() => setShowForgot(true)}
+          onShowForgot={abrirEsqueciSenha}
         />
       );
     }
@@ -283,13 +315,13 @@ function AppContent() {
             userEmail={user.email}
             onLogout={handleLogout}
             isDarkMode={isDarkMode}
-            onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
+            onToggleDarkMode={alternarTema}
             onShowToast={showToast}
             configGlobal={configGlobal}
             onSaveConfigGlobal={handleSaveConfigGlobal}
             budgets={budgets}
             onClearData={handleClearData}
-            onBackToMain={() => setActiveTab('orcamento')}
+            onBackToMain={irParaOrcamento}
           />
         );
       case 'orcamento':
@@ -302,7 +334,7 @@ function AppContent() {
             onShowToast={showToast}
             configGlobal={configGlobal}
             initialBudget={editingBudget}
-            onClearEditing={() => setEditingBudget(null)}
+            onClearEditing={limparEdicao}
           />
         );
     }
@@ -311,12 +343,8 @@ function AppContent() {
   if (!user) {
     return (
       <SafeAreaView style={[styles.container, isDarkMode && styles.darkBackground]}>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={isDarkMode ? '#020617' : '#f8fafc'} />
-        {toast.show && (
-          <View style={[styles.toast, toast.type === 'error' ? styles.toastError : styles.toastSuccess]}>
-            <Text style={styles.toastText}>{toast.msg}</Text>
-          </View>
-        )}
+        <BarraDeStatus isDarkMode={isDarkMode} />
+        <Toast show={toast.show} msg={toast.msg} type={toast.type} />
         {renderScreen()}
       </SafeAreaView>
     );
@@ -324,12 +352,8 @@ function AppContent() {
 
   return (
     <SafeAreaView style={[styles.container, isDarkMode && styles.darkBackground]}>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={isDarkMode ? '#020617' : '#f8fafc'} />
-      {toast.show && (
-        <View style={[styles.toast, toast.type === 'error' ? styles.toastError : styles.toastSuccess]}>
-          <Text style={styles.toastText}>{toast.msg}</Text>
-        </View>
-      )}
+      <BarraDeStatus isDarkMode={isDarkMode} />
+      <Toast show={toast.show} msg={toast.msg} type={toast.type} />
 
       <View style={[styles.header, isDarkMode && styles.headerDark]}>
         <View style={styles.brandRow}>
@@ -339,7 +363,7 @@ function AppContent() {
           </Text>
         </View>
 
-        <TouchableOpacity style={[styles.profileCircle, isDarkMode && styles.profileCircleDark]} onPress={() => setActiveTab('perfil')} activeOpacity={0.8}>
+        <TouchableOpacity style={[styles.profileCircle, isDarkMode && styles.profileCircleDark]} onPress={irParaPerfil} activeOpacity={0.8}>
           <Text style={styles.profileInitial}>{user?.email?.charAt(0)?.toUpperCase() || 'U'}</Text>
         </TouchableOpacity>
       </View>

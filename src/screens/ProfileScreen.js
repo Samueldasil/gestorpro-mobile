@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Switch, ScrollView } from 'react-native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import GlobalConfigScreen from './GlobalConfigScreen';
@@ -9,7 +9,7 @@ import { saveGlobalConfig, clearAndReloadData } from '../controllers/profileCont
 import { reportError } from '../utils/errorHandler';
 import useBackHandler from './useBackHandler'; // <-- Importado para funcionar no Perfil
 
-export default function ProfileScreen({
+function ProfileScreen({
   userEmail,
   onLogout,
   isDarkMode,
@@ -43,6 +43,12 @@ export default function ProfileScreen({
     return false; // Deixa voltar pro App.js se estiver na raiz do perfil
   });
 
+  const voltarParaPerfil = useCallback(() => setSubScreen(null), []);
+  const abrirTermos = useCallback(() => setSubScreen('terms'), []);
+  const abrirPrivacidade = useCallback(() => setSubScreen('privacy'), []);
+  const abrirCustosGlobais = useCallback(() => setSubScreen('global'), []);
+  const voltarParaPrivacidade = useCallback(() => setSubScreen('privacy'), []);
+
   const handleSaveConfig = async (newConfig) => {
     try {
       // Gravação acontece só aqui; o App apenas espelha o valor em memória.
@@ -73,9 +79,8 @@ export default function ProfileScreen({
       <GlobalConfigScreen
         configGlobal={configGlobal}
         onSave={handleSaveConfig}
-        onBack={() => setSubScreen(null)}
+        onBack={voltarParaPerfil}
         isDarkMode={isDarkMode}
-        onShowToast={onShowToast}
       />
     );
   }
@@ -83,8 +88,8 @@ export default function ProfileScreen({
   if (subScreen === 'privacy') {
     return (
       <PrivacyScreen
-        onBack={() => setSubScreen(null)}
-        onShowTerms={() => setSubScreen('terms')}
+        onBack={voltarParaPerfil}
+        onShowTerms={abrirTermos}
         onClearData={handleClearData}
         budgets={budgets}
         isDarkMode={isDarkMode}
@@ -96,7 +101,7 @@ export default function ProfileScreen({
   if (subScreen === 'terms') {
     return (
       <TermsScreen
-        onBack={() => setSubScreen('privacy')}
+        onBack={voltarParaPrivacidade}
         isDarkMode={isDarkMode}
       />
     );
@@ -149,7 +154,7 @@ export default function ProfileScreen({
 
         <TouchableOpacity
           style={[styles.menuItem, styles.menuItemBorder, isDarkMode && styles.menuItemBorderDark]}
-          onPress={() => setSubScreen('global')}
+          onPress={abrirCustosGlobais}
           activeOpacity={0.7}
         >
           <View style={styles.menuLabelRow}>
@@ -161,7 +166,7 @@ export default function ProfileScreen({
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => setSubScreen('privacy')}
+          onPress={abrirPrivacidade}
           activeOpacity={0.7}
         >
           <View style={styles.menuLabelRow}>
@@ -183,6 +188,8 @@ export default function ProfileScreen({
     </ScrollView>
   );
 }
+
+export default memo(ProfileScreen);
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f8fafc' },

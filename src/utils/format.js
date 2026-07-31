@@ -10,6 +10,22 @@
 // garante que a tela continue de pé.
 let intlDisponivel = true;
 
+// Construir um Intl.NumberFormat é caro e antes acontecia a CADA valor exibido
+// — uma lista de 50 orçamentos criava 50 formatadores por render, e um PDF de
+// resumo criava centenas. Agora é uma instância só, criada sob demanda.
+let formatadorMoeda = null;
+
+const obterFormatador = () => {
+  if (!formatadorMoeda) {
+    formatadorMoeda = new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+    });
+  }
+  return formatadorMoeda;
+};
+
 const formatarManualmente = (value) => {
   const negativo = value < 0;
   const [inteiro, decimal] = Math.abs(value).toFixed(2).split('.');
@@ -24,14 +40,11 @@ export function formatMoney(value) {
 
   if (intlDisponivel) {
     try {
-      return new Intl.NumberFormat('pt-BR', {
-        style: 'currency',
-        currency: 'BRL',
-        minimumFractionDigits: 2,
-      }).format(number);
+      return obterFormatador().format(number);
     } catch (error) {
       // Uma falha basta para desligar o Intl no resto da sessão.
       intlDisponivel = false;
+      formatadorMoeda = null;
       console.warn('Intl indisponível, usando formatação manual:', error?.message);
     }
   }

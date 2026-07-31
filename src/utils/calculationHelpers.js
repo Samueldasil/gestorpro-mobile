@@ -3,18 +3,35 @@
  * Evita cálculos repetitivos dentro de templates
  */
 
+import { MONTHS_PER_YEAR } from '../config/constants';
+
 /**
  * Calcula totais agregados de um array de orçamentos
  * @param {array} budgets - Array de orçamentos
  * @returns {object} - Objeto com totais
  */
 export const calculateTotals = (budgets = []) => {
+  // Antes eram quatro varreduras do array (3 reduce + 1 filter) para
+  // produzir cinco números. Agora é uma só.
+  let totalCusto = 0;
+  let totalPreco = 0;
+  let totalLucro = 0;
+  let activeBudgets = 0;
+
+  budgets.forEach((b) => {
+    const result = b?.result;
+    totalCusto += result?.custoTotal || 0;
+    totalPreco += result?.precoSugeridoTotal || 0;
+    totalLucro += result?.lucro || 0;
+    if (!b?.deletedAt) activeBudgets += 1;
+  });
+
   return {
-    totalCusto: budgets.reduce((acc, b) => acc + (b.result?.custoTotal || 0), 0),
-    totalPreco: budgets.reduce((acc, b) => acc + (b.result?.precoSugeridoTotal || 0), 0),
-    totalLucro: budgets.reduce((acc, b) => acc + (b.result?.lucro || 0), 0),
+    totalCusto,
+    totalPreco,
+    totalLucro,
     totalCount: budgets.length,
-    activeBudgets: budgets.filter(b => !b.deletedAt).length,
+    activeBudgets,
   };
 };
 
@@ -37,7 +54,7 @@ export const calculateMonthlyProfit = (budgets = []) => {
   const now = new Date();
   const months = [];
 
-  for (let i = 11; i >= 0; i--) {
+  for (let i = MONTHS_PER_YEAR - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     months.push({
       year: d.getFullYear(),
@@ -77,30 +94,18 @@ export const calculateStatistics = (budgets = []) => {
   const monthlyData = calculateMonthlyProfit(budgets);
   const totals = calculateActiveTotals(budgets);
   
+  // Uma passada só no lugar de três varreduras (map + spread + reduce).
+  let maxMonthlyProfit = 1;
+  let somaLucros = 0;
+  monthlyData.forEach((m) => {
+    somaLucros += m.profit;
+    if (m.profit > maxMonthlyProfit) maxMonthlyProfit = m.profit;
+  });
+
   return {
     ...totals,
     totalProfitMonths: monthlyData,
-    maxMonthlyProfit: Math.max(...monthlyData.map(m => m.profit), 1),
-    averageMonthlyProfit: monthlyData.length > 0 
-      ? monthlyData.reduce((acc, m) => acc + m.profit, 0) / monthlyData.length
-      : 0,
+    maxMonthlyProfit,
+    averageMonthlyProfit: monthlyData.length > 0 ? somaLucros / monthlyData.length : 0,
   };
-};
-
-/**
- * Agrupa budgets por período (mês/ano)
- * @param {array} budgets 
- * @returns {object}
- */
-export const groupByPeriod = (budgets = []) => {
-  return budgets.reduce((acc, budget) => {
-    const date = new Date(budget.createdAt || budget.created_at);
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    
-    if (!acc[key]) {
-      acc[key] = [];
-    }
-    acc[key].push(budget);
-    return acc;
-  }, {});
 };

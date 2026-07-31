@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { formatMoney } from '../utils/format';
@@ -7,12 +7,28 @@ import { calculateMonthlyProfit } from '../utils/calculationHelpers';
 const { width: screenWidth } = Dimensions.get('window');
 const CHART_WIDTH = Math.max(screenWidth - 64, 280);
 
-export default function MacroReportScreen({ budgets, onBack, isDarkMode }) {
+function MacroReportScreen({ budgets, onBack, isDarkMode }) {
   // Agrupa lucro por mês (últimos 12 meses) — mesma regra usada pelo resumo Macro.
   const safeMonthlyData = useMemo(() => calculateMonthlyProfit(budgets), [budgets]);
-  const maxProfit = Math.max(...safeMonthlyData.map(m => Number.isFinite(m.profit) ? m.profit : 0), 1);
-  const totalProfit = safeMonthlyData.reduce((acc, m) => acc + (Number.isFinite(m.profit) ? m.profit : 0), 0);
-  const avgProfit = safeMonthlyData.length > 0 ? totalProfit / safeMonthlyData.length : 0;
+
+  // Os três derivados varriam o array a cada render (inclusive durante o
+  // scroll). Uma passada só, memoizada junto com a série.
+  const { maxProfit, totalProfit, avgProfit } = useMemo(() => {
+    let max = 1;
+    let total = 0;
+
+    safeMonthlyData.forEach((m) => {
+      const profit = Number.isFinite(m.profit) ? m.profit : 0;
+      total += profit;
+      if (profit > max) max = profit;
+    });
+
+    return {
+      maxProfit: max,
+      totalProfit: total,
+      avgProfit: safeMonthlyData.length > 0 ? total / safeMonthlyData.length : 0,
+    };
+  }, [safeMonthlyData]);
 
   return (
     <ScrollView style={[styles.screen, isDarkMode && styles.screenDark]}>
@@ -62,6 +78,8 @@ export default function MacroReportScreen({ budgets, onBack, isDarkMode }) {
     </ScrollView>
   );
 }
+
+export default memo(MacroReportScreen);
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f8fafc' },

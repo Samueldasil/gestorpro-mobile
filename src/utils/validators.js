@@ -49,24 +49,6 @@ export const validatePasswordMatch = (password, confirmPassword) => {
 };
 
 /**
- * Valida um orçamento antes de salvar
- * @param {object} budget 
- * @returns {string|null} - Mensagem de erro ou null se válido
- */
-export const validateBudget = (budget) => {
-  if (!budget?.nomeProduto?.trim()) {
-    return 'Informe o nome do produto';
-  }
-  if (!Array.isArray(budget.insumos) || budget.insumos.length === 0) {
-    return 'Adicione pelo menos um ingrediente';
-  }
-  if (isNaN(budget.precoVendaValor) || budget.precoVendaValor <= 0) {
-    return 'Informe um preço de venda válido';
-  }
-  return null;
-};
-
-/**
  * Valida um ingrediente/insumo
  * @param {object} insumo 
  * @returns {string|null} - Mensagem de erro ou null se válido
@@ -151,18 +133,4 @@ export const toNumber = (value, fallback = 0) => {
 
   const parsed = Number(sanitized);
   return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-/**
- * Valida um número e retorna erro se inválido
- * @param {*} value 
- * @param {string} fieldName 
- * @returns {string|null} - Mensagem de erro ou null
- */
-export const validateNumber = (value, fieldName = 'Campo') => {
-  const sanitized = sanitizeNumber(value);
-  if (sanitized === '') {
-    return `${fieldName} inválido`;
-  }
-  return null;
 };
